@@ -16,6 +16,13 @@ pub mod session;
 pub mod worker_state;
 pub mod compaction;
 pub mod error_handling;
+pub mod error;
+pub mod cli;
+pub mod repl;
+pub mod bootstrap;
+pub mod subcommands;
+pub mod plugin;
+pub mod instruction;
 pub mod slash_commands;
 pub mod runtime;
 

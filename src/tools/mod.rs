@@ -60,7 +60,21 @@ impl ToolRegistry {
         let mut registry = Self {
             tools: HashMap::new(),
         };
-        // Tools will be registered here
+        
+        registry.register(Box::new(shell::ShellExecute));
+        registry.register(Box::new(file_read::FileRead));
+        registry.register(Box::new(file_write::FileWrite));
+        registry.register(Box::new(file_edit::FileEdit));
+        registry.register(Box::new(glob_search::GlobSearch));
+        registry.register(Box::new(grep_search::GrepSearch));
+        registry.register(Box::new(web_search::WebSearch));
+        registry.register(Box::new(web_fetch::WebFetch));
+        registry.register(Box::new(agent_launch::AgentLaunch));
+        registry.register(Box::new(todo_write::TodoWrite));
+        registry.register(Box::new(notebook_edit::NotebookEdit));
+        registry.register(Box::new(skill_invoke::SkillInvoke));
+        registry.register(Box::new(tool_search::ToolSearch));
+        
         registry
     }
 

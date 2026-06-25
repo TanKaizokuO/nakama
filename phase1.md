@@ -37,8 +37,12 @@ The provider API client is an HTTP abstraction layer that dispatches requests to
   5. Local-server base URL set and model name looks local → OpenAI-compatible.
   6. Fallback: check which credential env var is populated (Anthropic → OpenAI → xAI).
   7. Final default → Anthropic.
-- Implement authentication credential resolution for each provider per §2.2.5.
-- Handle the `sk-ant-*` key format detection for Anthropic API key vs. OAuth token routing.
+- Routing cascade implementation notes:
+  - Model name matching is case-insensitive for the `contains` and `starts with` checks.
+  - The cascade short-circuits: the first matching rule determines the provider.
+  - "Looks local" for rule 5 is defined as: model name does not contain `/` (except `local/` prefix) and `OLLAMA_HOST` environment variable is set to a valid URL.
+  - Credential population check for rule 6: test for non-empty string in `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` first, then `OPENAI_API_KEY`, then `XAI_API_KEY`.
+  - Provider selection result includes the resolved endpoint URL, authentication header, and provider-specific request serialization format.
 - Support request-level configuration: timeout overrides from `ProviderSettings` in config.
 
 ### MessageRequest / MessageResponse / OutputContentBlock Data Structures

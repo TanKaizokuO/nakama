@@ -10,7 +10,7 @@ impl Tool for AgentLaunch {
     fn required_permission(&self) -> PermissionMode { PermissionMode::DangerFullAccess }
     fn input_schema(&self) -> serde_json::Value { serde_json::json!({}) }
     fn output_schema(&self) -> serde_json::Value { serde_json::json!({}) }
-    async fn execute(&self, _input: serde_json::Value) -> Result<ToolResult, ToolError> {
+    async fn execute(&self, _input: serde_json::Value, _context: super::ToolContext) -> Result<ToolResult, ToolError> {
         Err(ToolError {
             error_type: "NotYetImplemented".to_string(),
             message: "AgentLaunch requires Phase 3 session runtime which is not yet implemented.".to_string(),

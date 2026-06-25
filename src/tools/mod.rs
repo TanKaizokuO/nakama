@@ -26,6 +26,14 @@ pub struct ToolResult {
     pub data: Option<serde_json::Value>,
 }
 
+use std::path::PathBuf;
+
+#[derive(Debug, Clone)]
+pub struct ToolContext {
+    pub workspace_roots: Vec<PathBuf>,
+    pub cwd: PathBuf,
+}
+
 #[async_trait]
 pub trait Tool: Send + Sync {
     fn name(&self) -> &'static str;
@@ -34,7 +42,7 @@ pub trait Tool: Send + Sync {
     fn input_schema(&self) -> serde_json::Value;
     fn output_schema(&self) -> serde_json::Value;
     
-    async fn execute(&self, input: serde_json::Value) -> Result<ToolResult, ToolError>;
+    async fn execute(&self, input: serde_json::Value, context: ToolContext) -> Result<ToolResult, ToolError>;
 }
 
 pub mod shell;

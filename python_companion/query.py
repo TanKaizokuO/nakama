@@ -1,8 +1,8 @@
 import json
 from typing import List, Dict, Any, Generator
 from dataclasses import dataclass, asdict
-from .session import UsageRecord
-from .routing import MatchResult
+from session import UsageRecord
+from routing import MatchResult
 
 @dataclass
 class DenialRecord:

@@ -62,6 +62,17 @@ pub struct CompactionRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SessionMetadata {
+    pub session_id: String,
+    pub created_at: String,
+    pub model: String,
+    pub permission_mode: String,
+    pub heartbeat: String,
+    pub liveness: bool,
+    pub compaction_history: Vec<CompactionRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 pub enum SessionMetadataRecord {
     #[serde(rename = "session_meta")]

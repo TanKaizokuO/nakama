@@ -2,7 +2,7 @@ import os
 import glob
 from dataclasses import dataclass
 from typing import List, Dict, Any
-from .inventory import InventoryLoader
+from inventory import InventoryLoader
 
 @dataclass
 class Ratio:

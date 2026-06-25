@@ -2,7 +2,6 @@ use super::{Tool, ToolError, ToolResult, PermissionMode};
 use async_trait::async_trait;
 use serde::Deserialize;
 use std::process::Stdio;
-use tokio::io::AsyncReadExt;
 
 pub struct ShellExecute;
 
@@ -60,7 +59,7 @@ impl Tool for ShellExecute {
             crate::path_scope::ValidationResult::Allowed { .. } => {}
         }
 
-        let mut child = tokio::process::Command::new("sh")
+        let child = tokio::process::Command::new("sh")
             .arg("-c")
             .arg(&params.command)
             .current_dir(&cwd)

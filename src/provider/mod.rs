@@ -1,7 +1,7 @@
 use crate::models::{MessageRequest, MessageResponse};
 use async_trait::async_trait;
 use futures::Stream;
-use std::collections::{HashSet, HashMap};
+use std::collections::HashSet;
 use std::pin::Pin;
 use thiserror::Error;
 

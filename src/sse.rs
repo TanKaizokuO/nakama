@@ -196,7 +196,7 @@ impl AccumulatorState {
                     }
                 }
             }
-            AccumulatorState::Finalizing { mut response } => {
+            AccumulatorState::Finalizing { response } => {
                 if let SSEEvent::SessionEnd = event {
                     *self = AccumulatorState::Complete(response);
                 } else {

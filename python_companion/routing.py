@@ -1,6 +1,6 @@
 import re
 from typing import List, Dict, Any
-from .inventory import InventoryLoader, CommandRecord, ToolRecord
+from inventory import InventoryLoader, CommandRecord, ToolRecord
 from dataclasses import dataclass
 
 @dataclass

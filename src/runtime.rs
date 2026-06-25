@@ -1,5 +1,6 @@
 use crate::session::Session;
-use crate::worker_state::{WorkerStateManager, WorkerState};
+use crate::worker_state::WorkerStateManager;
+use crate::data_contracts::WorkerState;
 use crate::compaction::{CompactionEngine, CompactionConfig};
 use crate::slash_commands::SlashCommandRegistry;
 use crate::data_contracts::{MessageRole, SessionMessageRecord, ContentBlock};

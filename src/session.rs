@@ -1,6 +1,6 @@
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use uuid::Uuid;
 use crate::data_contracts::{SessionMessageRecord, SessionMetadata, SessionMetadataRecord, UsageRecord};
 use thiserror::Error;

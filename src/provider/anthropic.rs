@@ -1,5 +1,5 @@
 use crate::models::{
-    InputContent, InputContentBlock, InputMessage, MessageRequest, MessageResponse,
+    InputContent, InputContentBlock, MessageRequest, MessageResponse,
     MessageRole, OutputContentBlock, TokenUsage, ToolResultContent,
 };
 use crate::provider::{resolve_auth, apply_extensions, ProviderClient, ProviderError, ProviderKind};

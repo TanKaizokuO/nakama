@@ -1,8 +1,7 @@
 use super::{Tool, ToolError, ToolResult, PermissionMode};
 use async_trait::async_trait;
 use serde::Deserialize;
-use std::path::PathBuf;
-use regex::{Regex, RegexBuilder};
+use regex::RegexBuilder;
 
 pub struct GrepSearch;
 

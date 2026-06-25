@@ -145,3 +145,46 @@ impl McpManager {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_mcp_lifecycle() {
+        let mut manager = McpManager::new();
+        
+        let mut mcp_servers = HashMap::new();
+        
+        // Invalid stdio server (missing command)
+        mcp_servers.insert("invalid_stdio".to_string(), serde_json::json!({
+            "transport": "stdio"
+        }));
+        
+        // Valid stdio server
+        mcp_servers.insert("valid_stdio".to_string(), serde_json::json!({
+            "transport": "stdio",
+            "command": "python3",
+            "args": ["-m", "http.server"]
+        }));
+
+        manager.discover_from_config(&Some(mcp_servers));
+
+        // Invalid isolation check
+        assert_eq!(manager.invalid_servers.len(), 1);
+        assert_eq!(manager.invalid_servers[0].server_name, "invalid_stdio");
+        assert_eq!(manager.invalid_servers[0].error_field, "command");
+
+        // Valid server validation
+        assert_eq!(manager.servers.len(), 1);
+        let valid_server = manager.servers.get("valid_stdio").unwrap();
+        assert_eq!(valid_server.state, McpServerState::Validated);
+        assert_eq!(valid_server.command, Some("python3".to_string()));
+
+        // Run spawn_and_initialize (it simulates the lifecycle)
+        manager.spawn_and_initialize().await;
+        
+        let valid_server_after = manager.servers.get("valid_stdio").unwrap();
+        assert_eq!(valid_server_after.state, McpServerState::Ready);
+    }
+}

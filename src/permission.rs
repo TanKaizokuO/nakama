@@ -155,8 +155,8 @@ impl PermissionEngine {
             return true;
         }
 
-        if pattern.ends_with(":*") {
-            let prefix = &pattern[0..pattern.len() - 2];
+        if pattern.ends_with('*') {
+            let prefix = &pattern[0..pattern.len() - 1];
             return subject.starts_with(prefix);
         }
 
@@ -191,5 +191,73 @@ impl PermissionEngine {
         }
 
         serde_json::to_string(input).unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rule_matching() {
+        assert!(PermissionEngine::match_rule("FileRead(*)", "fileread", "any subject"));
+        assert!(PermissionEngine::match_rule("FileRead", "fileread", "any subject"));
+        assert!(PermissionEngine::match_rule("FileRead(exact)", "fileread", "exact"));
+        assert!(!PermissionEngine::match_rule("FileRead(exact)", "fileread", "not exact"));
+        assert!(PermissionEngine::match_rule("FileRead(prefix*)", "fileread", "prefixsomething"));
+        assert!(!PermissionEngine::match_rule("FileRead(prefix*)", "fileread", "notprefix"));
+        assert!(PermissionEngine::match_rule("FileRead(\\(escaped\\))", "fileread", "(escaped)"));
+    }
+
+    #[test]
+    fn test_extract_subject() {
+        let json = serde_json::json!({ "file_path": "test.txt", "other": "val" });
+        assert_eq!(PermissionEngine::extract_subject(&json), "test.txt");
+
+        let json2 = serde_json::json!({ "command": "echo hi" });
+        assert_eq!(PermissionEngine::extract_subject(&json2), "echo hi");
+
+        let json3 = serde_json::json!("raw string");
+        assert_eq!(PermissionEngine::extract_subject(&json3), "raw string");
+    }
+
+    #[test]
+    fn test_evaluation_order() {
+        let mut rules = PermissionRules::default();
+        rules.denied_tools = Some(vec!["BadTool".to_string()]);
+        rules.deny = Some(vec!["FileWrite(/root/*)".to_string()]);
+        rules.allow = Some(vec!["FileWrite(/tmp/*)".to_string()]);
+
+        let engine = PermissionEngine::new(PermissionMode::ReadOnly, rules);
+
+        // 1. Check denied-tools list
+        assert!(matches!(
+            engine.evaluate("BadTool", PermissionMode::ReadOnly, "any", None),
+            PermissionDecision::Deny(_)
+        ));
+
+        // 2. Check deny rules
+        assert!(matches!(
+            engine.evaluate("FileWrite", PermissionMode::WorkspaceWrite, "/root/test", None),
+            PermissionDecision::Deny(_)
+        ));
+
+        // 4. Hook override Allow
+        assert_eq!(
+            engine.evaluate("FileWrite", PermissionMode::WorkspaceWrite, "/var/test", Some(HookOverride::Allow)),
+            PermissionDecision::Permit
+        );
+
+        // 6. Check allow rules (Active mode is ReadOnly, so normally it would deny WorkspaceWrite, but allow rule permits it)
+        assert_eq!(
+            engine.evaluate("FileWrite", PermissionMode::WorkspaceWrite, "/tmp/test", None),
+            PermissionDecision::Permit
+        );
+
+        // 9. Default deny (Active mode ReadOnly does not satisfy WorkspaceWrite)
+        assert!(matches!(
+            engine.evaluate("FileWrite", PermissionMode::WorkspaceWrite, "/other/test", None),
+            PermissionDecision::Deny(_)
+        ));
     }
 }

@@ -28,6 +28,7 @@ pub mod runtime;
 pub mod nim_accumulator;
 
 use runtime::{ConversationRuntime, RuntimeConfig};
+use crate::data_contracts::StagePermissionMode;
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 
@@ -52,27 +53,37 @@ async fn main() {
     // Step 4: Print ready message
     println!("Nakama ready. Model: moonshotai/kimi-k2.6");
 
+    let perm_mode_str = std::env::var("NAKAMA_PERMISSION_MODE")
+        .unwrap_or_else(|_| "prompt".to_string())
+        .to_lowercase();
+        
+    let stage_permission_mode = match perm_mode_str.as_str() {
+        "auto" => StagePermissionMode::Auto,
+        _ => StagePermissionMode::Prompt,
+    };
+
+    let workspace_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+
     // Initialize the conversation runtime
     let session_dir = PathBuf::from(".claw/sessions");
     let config = RuntimeConfig {
         base_dir: session_dir,
         active_model: "moonshotai/kimi-k2.6".to_string(),
         permission_mode: "default".to_string(),
+        workspace_root,
+        stage_permission_mode,
     };
     let mut runtime = ConversationRuntime::new(config, None);
 
     // Step 5: REPL loop
-    let stdin = io::stdin();
-    let mut reader = stdin.lock();
-
     loop {
         // Print prompt
         print!("> ");
         io::stdout().flush().unwrap();
 
-        // Read a line
+        // Read a line (without holding a persistent lock, so tool prompts can read stdin too)
         let mut line = String::new();
-        match reader.read_line(&mut line) {
+        match io::stdin().read_line(&mut line) {
             Ok(0) => {
                 // EOF (Ctrl-D)
                 println!();

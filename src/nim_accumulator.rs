@@ -12,6 +12,13 @@
 
 use crate::data_contracts::UsageRecord;
 
+#[derive(Debug, Clone, Default)]
+pub struct ToolCallAccumulation {
+    pub id: String,
+    pub name: String,
+    pub arguments: String,  // JSON string, built by concatenation
+}
+
 /// Accumulates OpenAI-compatible SSE streaming chunks into a single text
 /// response with token usage and stop reason.
 pub struct NimAccumulator {
@@ -20,6 +27,7 @@ pub struct NimAccumulator {
     output_tokens: u32,
     stop_reason: Option<String>,
     done: bool,
+    pub tool_call: Option<ToolCallAccumulation>,
 }
 
 /// The text fragment extracted from a single SSE chunk, if any.
@@ -34,6 +42,7 @@ impl NimAccumulator {
             output_tokens: 0,
             stop_reason: None,
             done: false,
+            tool_call: None,
         }
     }
 
@@ -82,6 +91,35 @@ impl NimAccumulator {
             self.stop_reason = Some(reason.to_string());
         }
 
+        // Extract delta.tool_calls
+        if let Some(tool_calls) = choice.get("delta").and_then(|d| d.get("tool_calls")).and_then(|tc| tc.as_array()) {
+            if let Some(tc) = tool_calls.get(0) {
+                // Parse ID and name (first chunk)
+                if let Some(id) = tc.get("id").and_then(|v| v.as_str()) {
+                    if let Some(func) = tc.get("function") {
+                        if let Some(name) = func.get("name").and_then(|v| v.as_str()) {
+                            if self.tool_call.is_none() {
+                                self.tool_call = Some(ToolCallAccumulation {
+                                    id: id.to_string(),
+                                    name: name.to_string(),
+                                    arguments: String::new(),
+                                });
+                            }
+                        }
+                    }
+                }
+                
+                // Accumulate arguments (subsequent chunks)
+                if let Some(func) = tc.get("function") {
+                    if let Some(args) = func.get("arguments").and_then(|v| v.as_str()) {
+                        if let Some(ref mut current_tc) = self.tool_call {
+                            current_tc.arguments.push_str(args);
+                        }
+                    }
+                }
+            }
+        }
+
         // Extract delta.content — ignore if null or absent
         let content = choice
             .get("delta")
@@ -105,10 +143,10 @@ impl NimAccumulator {
     /// Consume the accumulator and return the final result.
     /// Takes `self` by value — no clone of text_buffer needed.
     ///
-    /// Returns (full_text, usage_record, stop_reason).
+    /// Returns (tool_call_opt, full_text, usage_record, stop_reason).
     /// If usage tokens are both zero after a completed stream, logs a warning
     /// per G1 — the provider may not have honoured stream_options.include_usage.
-    pub fn into_result(self) -> (String, UsageRecord, Option<String>) {
+    pub fn into_tool_call(self) -> (Option<ToolCallAccumulation>, String, UsageRecord, Option<String>) {
         if self.done && self.input_tokens == 0 && self.output_tokens == 0 {
             eprintln!(
                 "Warning: stream completed but no token usage was reported. \
@@ -123,6 +161,6 @@ impl NimAccumulator {
             cache_read_tokens: 0,
         };
 
-        (self.text_buffer, usage, self.stop_reason)
+        (self.tool_call, self.text_buffer, usage, self.stop_reason)
     }
 }

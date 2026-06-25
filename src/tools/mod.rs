@@ -58,6 +58,7 @@ pub mod todo_write;
 pub mod notebook_edit;
 pub mod skill_invoke;
 pub mod tool_search;
+pub mod dispatch;
 
 pub struct ToolRegistry {
     tools: HashMap<String, Box<dyn Tool>>,

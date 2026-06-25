@@ -100,3 +100,10 @@ pub struct StructuredOutputFallback {
     pub output_text: String,
     pub fallback_mode: bool, // always true
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StagePermissionMode {
+    Auto,    // approve everything within workspace
+    Prompt,  // ask user before each tool call
+}
+

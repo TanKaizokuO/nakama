@@ -502,11 +502,60 @@ mod tests {
         assert!(accumulator.is_done());
 
         // Verify accumulated results
-        let (text, usage, stop_reason) = accumulator.into_result();
+        let (tool_call_opt, text, usage, stop_reason) = accumulator.into_tool_call();
+        assert!(tool_call_opt.is_none());
         assert_eq!(text, "Hello world");
         assert_eq!(stop_reason, Some("stop".to_string()));
         assert_eq!(usage.input_tokens, 15);
         assert_eq!(usage.output_tokens, 25);
+    }
+
+    #[test]
+    fn test_nim_accumulator_tool_call() {
+        use crate::nim_accumulator::NimAccumulator;
+
+        let mut accumulator = NimAccumulator::new();
+
+        // First chunk contains ID and Name
+        let data1 = r#"{"choices":[{"delta":{"tool_calls":[{"id":"call_123","function":{"name":"shell"}}]}}]}"#;
+        accumulator.process_line(data1);
+
+        // Second chunk contains arguments fragment
+        let data2 = r#"{"choices":[{"delta":{"tool_calls":[{"function":{"arguments":"{\"cmd\""}}]}}]}"#;
+        accumulator.process_line(data2);
+
+        // Third chunk contains more arguments fragment
+        let data3 = r#"{"choices":[{"delta":{"tool_calls":[{"function":{"arguments":":\"ls\"}"}}]}}]}"#;
+        accumulator.process_line(data3);
+
+        accumulator.process_line("[DONE]");
+
+        let (tc_opt, text, _, _) = accumulator.into_tool_call();
+        assert!(text.is_empty());
+        let tc = tc_opt.expect("Should have tool call");
+        assert_eq!(tc.id, "call_123");
+        assert_eq!(tc.name, "shell");
+        assert_eq!(tc.arguments, "{\"cmd\":\"ls\"}");
+    }
+
+    #[test]
+    fn test_nim_accumulator_text_then_tool() {
+        use crate::nim_accumulator::NimAccumulator;
+
+        let mut accumulator = NimAccumulator::new();
+
+        let data1 = r#"{"choices":[{"delta":{"content":"Let me check."}}]}"#;
+        accumulator.process_line(data1);
+
+        let data2 = r#"{"choices":[{"delta":{"tool_calls":[{"id":"1","function":{"name":"ls","arguments":"{}"}}]}}]}"#;
+        accumulator.process_line(data2);
+
+        accumulator.process_line("[DONE]");
+
+        let (tc_opt, text, _, _) = accumulator.into_tool_call();
+        assert_eq!(text, "Let me check.");
+        let tc = tc_opt.unwrap();
+        assert_eq!(tc.name, "ls");
     }
 }
 

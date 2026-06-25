@@ -12,10 +12,10 @@ The project is structured into 5 cohesive phases:
 - **SSE Streams**: Asynchronous Server-Sent Events infrastructure using `reqwest` and `tokio`.
 
 ### Phase 2: Tool System & Permissions (Rust)
-- **Tool Pool**: A canonical inventory mapping operations to permissions.
-- **Permission Engine**: Enforces rigid boundaries (`ReadOnly`, `WriteApprove`, etc.) over tool execution and filesystem scope.
-- **Sandbox Detection**: Safely identifies execution environments (Docker, Kubernetes, WSL).
-
+- **Tool Dispatch System**: Integrated five core tools (`shell`, `file_read`, `file_write`, `grep_search`, `list_files`) to perform core system tasks.
+- **Permission Gates**: Interactive (`Prompt`) and autonomous (`Auto`) permission modes block or allow execution dynamically via `NAKAMA_PERMISSION_MODE`.
+- **Path Scope Boundaries**: Advanced workspace bounds checking that safely resolves paths to prevent directory traversal escapes.
+- **Execution Loop**: A recursive execution engine that streams tool calls from OpenAI-compatible API responses, executes them locally, and loops tool results back into the model context dynamically.
 ### Phase 3: Session Runtime (Rust)
 - **JSONL Store**: State persistence leveraging a strict message layout (`role`, `content`, `usage`, `tool_call_id`).
 - **Worker State**: Secure session markers tracking the active process parameters.

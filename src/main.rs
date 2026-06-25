@@ -6,6 +6,7 @@ pub mod path_scope;
 pub mod usage;
 pub mod tools;
 pub mod permission;
+pub mod prompter;
 mod tests;
 
 fn main() {

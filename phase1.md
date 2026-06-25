@@ -139,6 +139,12 @@ All six typed SSE stream events must be individually defined and handled:
   - `precedence_rank` for each config file
   - `wins_for_keys` — which keys each file controls
   - `shadowed_keys` — which keys are overridden by higher-precedence files
+- Configuration merge algorithm:
+  - Shallow merge at the top-level key granularity: if two files both define `ModelAliases`, the higher-precedence file's value replaces the lower-precedence file's value entirely.
+  - For list-valued keys (`PermissionRules.allow[]`, `Hooks`), the higher-precedence file's list replaces (does not concatenate with) the lower-precedence file's list.
+  - File discovery: user-level paths use `$HOME`; project-level paths are anchored to the nearest Git root (found by walking parent directories for `.git/`). If no Git root is found, the working directory is used.
+  - Missing files are silently skipped (not an error).
+  - Malformed JSON in any config file produces a typed `config_parse_error` with the file path and parse position.
 - Implement model alias resolution (§3.9):
   - Built-in alias table: `opus` → `claude-opus-4-7`, `sonnet` → `claude-sonnet-4-6`, `haiku` → `claude-haiku-4-5-20251213`, `grok`/`grok-3` → `grok-3`, `grok-mini`/`grok-3-mini` → `grok-3-mini`, `kimi` → `kimi-k2.5`, `qwen-max` → `qwen-max`, `qwen-plus` → `qwen-plus`.
   - User-defined aliases from config files override built-in aliases.

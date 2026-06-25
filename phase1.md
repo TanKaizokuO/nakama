@@ -188,6 +188,17 @@ Edge cases from §4.7:
 - Home directory shorthand → expanded before validation.
 - Shell redirection in payload → target path extracted and validated.
 - Malformed shell syntax → fallback to whitespace splitting.
+- POSIX shell tokenizer specification:
+  - Single-quoted strings: all characters between `'...'` are literal (no escape processing). Adjacent tokens are concatenated.
+  - Double-quoted strings: backslash escapes are processed for `\$`, `\"`, `\\`, `` \` ``, `\newline`. All other characters are literal.
+  - Unquoted tokens: word splitting occurs on whitespace (space, tab, newline). Backslash escapes the following character.
+  - Comment handling: `#` in an unquoted context starts a comment (remainder of line is ignored).
+  - Fallback: if the parser encounters an unmatched quote (single or double), it abandons shlex parsing, splits the entire payload on whitespace, and strips matching external quotes from each resulting token.
+- Path containment algorithm:
+  1. Canonicalize the candidate path using `realpath` (resolving all symlinks).
+  2. Canonicalize each workspace root using `realpath`.
+  3. Check if the canonical candidate starts with any canonical workspace root (using string prefix comparison with a trailing `/` to prevent partial directory name matches like `/workspace-extra` matching `/workspace`).
+  4. If no root matches, deny with `candidate_path` and `resolved_path` in the error.
 
 ### Usage Tracking & Cost Estimation
 

@@ -219,7 +219,13 @@ Edge cases from §4.7:
   - Opus-class: Input $15.00/M, Output $75.00/M, Cache Write $18.75/M, Cache Read $1.50/M
   - Unknown (default): Input $15.00/M, Output $75.00/M, Cache Write $18.75/M, Cache Read $1.50/M
 - Implement cost formula: `cost = (tokens / 1,000,000) × rate_per_million`.
+- Model family classification for pricing:
+  - **Haiku-class**: model name contains `haiku` (case-insensitive).
+  - **Sonnet-class**: model name contains `sonnet` (case-insensitive).
+  - **Opus-class**: model name contains `opus` (case-insensitive).
+  - **Unknown**: all other models (including non-Anthropic providers). Uses Sonnet-class rates as defaults to avoid undercharging.
 - Format dollar amounts as `$<amount>` with 4 decimal places (e.g., `$0.0150`).
+- Total cost per turn = sum of four cost components: `input_cost + output_cost + cache_write_cost + cache_read_cost`.
 - Implement the cumulative usage tracker (§5.4):
   - `LatestTurnUsage` — replaced on each `record()` call.
   - `CumulativeUsage` — additively accumulated across all turns.

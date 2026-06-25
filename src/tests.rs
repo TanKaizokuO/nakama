@@ -464,4 +464,49 @@ mod tests {
         assert_eq!(tracker.latest_turn_usage.input_tokens, 20);
         assert_eq!(tracker.latest_turn_usage.output_tokens, 10);
     }
+
+    #[test]
+    fn test_nim_accumulator() {
+        use crate::nim_accumulator::NimAccumulator;
+
+        let mut accumulator = NimAccumulator::new();
+        assert!(!accumulator.is_done());
+
+        // Chunk 1: "Hello"
+        let data1 = r#"{"id":"chatcmpl-123","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}"#;
+        let delta1 = accumulator.process_line(data1);
+        assert_eq!(delta1, Some("Hello".to_string()));
+        assert!(!accumulator.is_done());
+
+        // Chunk 2: " world"
+        let data2 = r#"{"id":"chatcmpl-123","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":" world"},"finish_reason":null}]}"#;
+        let delta2 = accumulator.process_line(data2);
+        assert_eq!(delta2, Some(" world".to_string()));
+        assert!(!accumulator.is_done());
+
+        // Chunk 3: Empty/Null delta content
+        let data3 = r#"{"id":"chatcmpl-123","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":null}]}"#;
+        let delta3 = accumulator.process_line(data3);
+        assert_eq!(delta3, None);
+        assert!(!accumulator.is_done());
+
+        // Chunk 4: Stop reason & Usage
+        let data4 = r#"{"id":"chatcmpl-123","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":15,"completion_tokens":25}}"#;
+        let delta4 = accumulator.process_line(data4);
+        assert_eq!(delta4, None);
+        assert!(!accumulator.is_done());
+
+        // Chunk 5: [DONE] sentinel
+        let delta5 = accumulator.process_line("[DONE]");
+        assert_eq!(delta5, None);
+        assert!(accumulator.is_done());
+
+        // Verify accumulated results
+        let (text, usage, stop_reason) = accumulator.into_result();
+        assert_eq!(text, "Hello world");
+        assert_eq!(stop_reason, Some("stop".to_string()));
+        assert_eq!(usage.input_tokens, 15);
+        assert_eq!(usage.output_tokens, 25);
+    }
 }
+

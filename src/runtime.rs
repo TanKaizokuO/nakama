@@ -3,7 +3,9 @@ use crate::worker_state::WorkerStateManager;
 use crate::data_contracts::WorkerState;
 use crate::compaction::{CompactionEngine, CompactionConfig};
 use crate::slash_commands::SlashCommandRegistry;
-use crate::data_contracts::{MessageRole, SessionMessageRecord, ContentBlock};
+use crate::data_contracts::{MessageRole, SessionMessageRecord, ContentBlock, UsageRecord};
+use crate::nim_accumulator::NimAccumulator;
+use std::io::Write;
 use std::path::PathBuf;
 
 pub struct RuntimeConfig {
@@ -39,6 +41,182 @@ impl ConversationRuntime {
         }
     }
 
+    /// Real streaming provider call to NVIDIA NIM (OpenAI-compatible).
+    ///
+    /// Sends user input to the NIM endpoint, streams the response to stdout
+    /// chunk by chunk, then persists both the user and assistant turns to JSONL.
+    pub async fn execute_turn_async(
+        &mut self,
+        user_input: &str,
+        api_key: &str,
+        base_url: &str,
+    ) {
+        // Step 1: Skip empty input
+        if user_input.trim().is_empty() {
+            return;
+        }
+
+        // Step 2: Route slash commands (existing logic)
+        if let Some(cmd_output) = self.slash_commands.dispatch(user_input) {
+            println!("{}", cmd_output);
+            self.persist_session();
+            return;
+        }
+
+        // Build the OpenAI-compatible messages array from session history + new input.
+        // G2: Explicit conversion from Vec<ContentBlock> to OpenAI message format.
+        // Stage 1 only handles text blocks; other variants are stringified as placeholders.
+        let content_blocks_to_string = |blocks: &[ContentBlock]| -> String {
+            blocks
+                .iter()
+                .map(|b| match b {
+                    ContentBlock::Text { text } => text.clone(),
+                    _ => "[unsupported block]".to_string(),
+                })
+                .collect::<Vec<_>>()
+                .join("")
+        };
+
+        let mut messages: Vec<serde_json::Value> = self
+            .session
+            .messages
+            .iter()
+            .map(|m| {
+                let role = match m.role {
+                    MessageRole::User => "user",
+                    MessageRole::Assistant => "assistant",
+                    MessageRole::System => "system",
+                    MessageRole::Tool => "tool",
+                };
+                serde_json::json!({
+                    "role": role,
+                    "content": content_blocks_to_string(&m.content)
+                })
+            })
+            .collect();
+
+        // Append the new user message
+        messages.push(serde_json::json!({
+            "role": "user",
+            "content": user_input
+        }));
+
+        // Build request body
+        let request_body = serde_json::json!({
+            "model": "moonshotai/kimi-k2.6",
+            "max_tokens": 4096,
+            "stream": true,
+            "stream_options": { "include_usage": true },
+            "messages": messages
+        });
+
+        // Send POST request
+        let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+        let client = reqwest::Client::new();
+
+        let response = match client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("Content-Type", "application/json")
+            .header("Accept", "text/event-stream")
+            .json(&request_body)
+            .send()
+            .await
+        {
+            Ok(resp) => resp,
+            Err(e) => {
+                eprintln!("error: HTTP request failed: {}", e);
+                return;
+            }
+        };
+
+        // G3: Check HTTP status before entering the streaming loop.
+        // Non-2xx responses contain a JSON error body, not SSE events.
+        if !response.status().is_success() {
+            let status = response.status();
+            let err_body = response.text().await.unwrap_or_default();
+            eprintln!("error: NIM API returned HTTP {}: {}", status, err_body);
+            return;
+        }
+
+        // Stream SSE chunks
+        let mut accumulator = NimAccumulator::new();
+        let mut byte_stream = response.bytes_stream();
+
+        use futures::StreamExt;
+        let mut line_buffer = String::new();
+
+        while let Some(chunk_result) = byte_stream.next().await {
+            let chunk_bytes = match chunk_result {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    eprintln!("error: stream read failed: {}", e);
+                    break;
+                }
+            };
+
+            // Append raw bytes to line buffer and process complete lines
+            let chunk_str = String::from_utf8_lossy(&chunk_bytes);
+            line_buffer.push_str(&chunk_str);
+
+            // Process all complete lines in the buffer
+            while let Some(newline_pos) = line_buffer.find('\n') {
+                let line = line_buffer[..newline_pos].trim().to_string();
+                line_buffer = line_buffer[newline_pos + 1..].to_string();
+
+                if line.is_empty() {
+                    continue;
+                }
+
+                // SSE lines are prefixed with "data: "
+                if let Some(data) = line.strip_prefix("data: ") {
+                    if let Some(text) = accumulator.process_line(data) {
+                        // Task 1.3: Stream output to terminal as chunks arrive
+                        print!("{}", text);
+                        std::io::stdout().flush().unwrap();
+                    }
+                }
+                // Ignore non-data SSE lines (e.g., "event:", "id:", comments)
+            }
+
+            if accumulator.is_done() {
+                break;
+            }
+        }
+
+        // Print newline after [DONE]
+        println!();
+
+        // Consume the accumulator
+        let (full_text, usage, _stop_reason) = accumulator.into_result();
+
+        // Task 1.4: Persist the turn to JSONL
+        // User turn
+        let user_record = SessionMessageRecord {
+            role: MessageRole::User,
+            content: vec![ContentBlock::Text { text: user_input.to_string() }],
+            usage: None,
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            tool_call_id: None,
+        };
+        self.session.messages.push(user_record);
+
+        // Assistant turn
+        let assistant_record = SessionMessageRecord {
+            role: MessageRole::Assistant,
+            content: vec![ContentBlock::Text { text: full_text }],
+            usage: Some(usage),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            tool_call_id: None,
+        };
+        self.session.messages.push(assistant_record);
+
+        // Persist
+        self.persist_session();
+    }
+
+    // TODO: Remove in Stage 2 — replaced by execute_turn_async
+    #[allow(dead_code)]
     pub fn execute_turn(&mut self, user_input: &str) {
         // Step 1: Receive user input
         if user_input.trim().is_empty() {
@@ -81,7 +259,7 @@ impl ConversationRuntime {
             let mock_response = SessionMessageRecord {
                 role: MessageRole::Assistant,
                 content: vec![ContentBlock::Text { text: "Mock response".to_string() }],
-                usage: Some(crate::data_contracts::UsageRecord { input_tokens: 10, output_tokens: 20, cache_creation_tokens: 0, cache_read_tokens: 0 }),
+                usage: Some(UsageRecord { input_tokens: 10, output_tokens: 20, cache_creation_tokens: 0, cache_read_tokens: 0 }),
                 timestamp: chrono::Utc::now().to_rfc3339(),
                 tool_call_id: None,
             };

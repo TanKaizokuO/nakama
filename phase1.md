@@ -43,6 +43,16 @@ The provider API client is an HTTP abstraction layer that dispatches requests to
   - "Looks local" for rule 5 is defined as: model name does not contain `/` (except `local/` prefix) and `OLLAMA_HOST` environment variable is set to a valid URL.
   - Credential population check for rule 6: test for non-empty string in `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` first, then `OPENAI_API_KEY`, then `XAI_API_KEY`.
   - Provider selection result includes the resolved endpoint URL, authentication header, and provider-specific request serialization format.
+- Implement authentication credential resolution per §2.2.5:
+  - **Anthropic**: Check `ANTHROPIC_API_KEY` first; if present and starts with `sk-ant-`, use as `x-api-key` header. If `ANTHROPIC_AUTH_TOKEN` is set, use as `Authorization: Bearer` header. If an `sk-ant-*` key is found in `ANTHROPIC_AUTH_TOKEN`, produce a diagnostic hint.
+  - **OpenAI-compatible**: Use `OPENAI_API_KEY` as `Authorization: Bearer`. For local servers via `OLLAMA_HOST`, omit the auth header entirely.
+  - **xAI**: Use `XAI_API_KEY` as `Authorization: Bearer`.
+  - **DashScope**: Use `DASHSCOPE_API_KEY` as `Authorization: Bearer`.
+- Per-provider HTTP request configuration:
+  - Content-Type: `application/json` for all providers.
+  - Anthropic requires additional headers: `anthropic-version` (protocol version string).
+  - Timeout: configurable via `ProviderSettings.timeout` (default: 600 seconds).
+  - Retry: no automatic retry at the HTTP level (retries are managed at the conversation runtime layer in Phase 3).
 - Support request-level configuration: timeout overrides from `ProviderSettings` in config.
 
 ### MessageRequest / MessageResponse / OutputContentBlock Data Structures

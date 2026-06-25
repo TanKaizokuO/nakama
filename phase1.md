@@ -93,6 +93,13 @@ All six typed SSE stream events must be individually defined and handled:
 - Accumulate a complete `MessageResponse` from the stream by applying each event in sequence.
 - Handle malformed SSE lines gracefully (skip unknown event types, log warnings).
 - Handle SSE stream interruption (connection drop mid-stream): preserve partial response and surface an error.
+- Implement an event accumulation state machine:
+  - **Initial** → awaiting `SessionStart`.
+  - **Streaming** → received `SessionStart`, processing `ContentBlockBegin`/`ContentBlockDelta`/`ContentBlockEnd` events.
+  - **Finalizing** → received `MessageDelta`, awaiting `SessionEnd`.
+  - **Complete** → received `SessionEnd`, response fully assembled.
+  - **Error** → connection dropped or malformed event received; partial response preserved.
+- Validate event ordering: `ContentBlockDelta` must reference a block index that was opened by a prior `ContentBlockBegin` and not yet closed by `ContentBlockEnd`. Out-of-order events are logged as warnings and skipped.
 
 ### Configuration Loading
 

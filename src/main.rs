@@ -8,6 +8,7 @@ pub mod tools;
 pub mod permission;
 pub mod prompter;
 pub mod hook;
+pub mod mcp;
 mod tests;
 
 fn main() {

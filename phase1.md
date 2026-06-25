@@ -150,6 +150,11 @@ All six typed SSE stream events must be individually defined and handled:
   - User-defined aliases from config files override built-in aliases.
   - Alias resolution is applied before provider routing.
 - Implement model selection precedence: CLI flag → env var (`CLAW_MODEL` → `ANTHROPIC_MODEL` → `ANTHROPIC_DEFAULT_MODEL`) → config file → hardcoded default.
+  - The hardcoded default model is `claude-sonnet-4-6`.
+  - Environment variable chain: check `CLAW_MODEL` first; if unset, check `ANTHROPIC_MODEL`; if unset, check `ANTHROPIC_DEFAULT_MODEL`. First non-empty value wins.
+  - CLI flag (`--model` or `ModelSelection`) always takes highest precedence.
+  - Alias resolution is idempotent: resolving an already-resolved model name returns it unchanged.
+  - Unknown aliases are passed through verbatim to the provider routing cascade (they are not treated as errors).
 
 ### Workspace Path Scope Validation
 

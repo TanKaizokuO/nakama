@@ -7,6 +7,7 @@ pub mod usage;
 pub mod tools;
 pub mod permission;
 pub mod prompter;
+pub mod hook;
 mod tests;
 
 fn main() {

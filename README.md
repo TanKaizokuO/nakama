@@ -32,10 +32,12 @@ Whether you're looking to run local shell commands via AI, interface with OpenAI
 ## Features
 
 - **Dual-Architecture Engine:** High-performance Rust backend for state and streaming, paired with a Python companion for prompt routing and auditing.
-- **Advanced Tool Dispatch System:** Built-in capabilities including shell execution, file I/O operations, and recursive grep searches, all bound by strict path-scope validations to prevent directory traversal escapes.
-- **Interactive Permission Gates:** Granular control over AI actions with `Prompt` (interactive approval) and `Auto` (autonomous execution) modes.
-- **Provider Interoperability:** Seamlessly routes between AI models and providers (e.g., Anthropic, OpenAI, xAI, DashScope, NVIDIA NIM) using a unified Server-Sent Events (SSE) streaming interface.
+- **Advanced Tool Dispatch System:** Built-in capabilities including shell execution, file I/O operations, recursive grep searches, live web fetching and searching, and structured session todo tracking. All bound by strict path-scope validations to prevent directory traversal escapes.
+- **External MCP Bridge System:** Model Context Protocol (MCP) bridging to support external runtime servers and dynamically load tools.
+- **Interactive Permission Gates:** Granular control over AI actions with `Prompt` (interactive approval) and `Auto` (autonomous execution) modes across multiple permission hierarchies.
+- **Provider Interoperability:** Seamlessly routes between AI models and providers (e.g., Anthropic, OpenAI, xAI, DashScope, NVIDIA NIM) using a unified Server-Sent Events (SSE) streaming interface with strict token bounds.
 - **Intelligent Transcript Compaction:** Automatically summarizes lengthy conversation histories to stay within model token context limits.
+- **Layered Configuration:** Robust hierarchical settings handling from global `~/.claw.json` configurations down to local `.claw/settings.local.json` overrides.
 
 ---
 

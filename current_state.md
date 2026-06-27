@@ -3,7 +3,7 @@
 Last Updated: 2026-06-27
 
 ## Overall Progress
-- Estimated completion: 85%
+- Estimated completion: 90%
 - Total features: 12
 - Completed: 11
 - Partially Implemented: 1
@@ -76,8 +76,8 @@ Last Updated: 2026-06-27
 
 ### Built-In Tool System
 - Status: 🟡 Partial
-- What is implemented: Core filesystem and execution tasks (`ShellExecute`, `FileRead`, `FileWrite`, `FileEdit`, `GlobSearch`, `GrepSearch`).
-- What is missing: Domain specific integration tools (`AgentLaunch`, `NotebookEdit`, `SkillInvoke`, `TodoWrite`, `ToolSearch`, `WebFetch`, `WebSearch`).
+- What is implemented: Core filesystem and execution tasks (`ShellExecute`, `FileRead`, `FileWrite`, `FileEdit`, `GlobSearch`, `GrepSearch`), network connectivity (`WebFetch`, `WebSearch`), and session state tracking (`TodoWrite`).
+- What is missing: Domain specific integration tools (`AgentLaunch`, `NotebookEdit`, `SkillInvoke`, `ToolSearch`).
 - Files involved: `src/tools/shell.rs`, `src/tools/dispatch.rs`, and remaining stubbed tool files.
 
 ## Not Yet Implemented
@@ -96,8 +96,8 @@ Last Updated: 2026-06-27
 | `src/cli.rs` / `src/subcommands.rs` | Complete | Active and parsing properly |
 | `src/provider/` | Complete | All API providers are functional |
 | `src/runtime.rs` / `src/compaction.rs` | Complete | Conversational multi-turn loop and context sliding window |
-| `src/tools/shell.rs`, `file_*.rs` | Complete | Baseline tool execution |
-| `src/tools/web_*.rs`, `agent_*.rs` | Partial | These are just unimplemented stubs |
+| `src/tools/shell.rs`, `file_*.rs`, `web_*.rs`, `todo_write.rs` | Complete | Baseline and web/state tools running |
+| `agent_*.rs`, `notebook_edit.rs` | Partial | These remain unimplemented stubs |
 | `src/path_scope.rs` / `src/permission.rs`| Complete | Access boundaries active |
 | `src/config/` | Complete | Hierarchical settings implemented |
 
@@ -119,9 +119,7 @@ Last Updated: 2026-06-27
 ## Remaining Work
 
 ### High Priority
-- [ ] Implement `WebFetch` and `WebSearch` built-in tools to grant external network connectivity outside MCP.
-- [ ] Implement `TodoWrite` for session persistence tracking integration.
-- [ ] Add integration testing coverage on Anthropic stream extraction.
+- [ ] Add integration testing coverage on Anthropic stream extraction edge cases.
 
 ### Medium Priority
 - [ ] Implement `SkillInvoke` and `AgentLaunch` for recursive workflows.
@@ -131,6 +129,6 @@ Last Updated: 2026-06-27
 
 ## Next Recommended Steps
 
-1. Fill in the stubbed Built-In Tools starting with `WebFetch` and `WebSearch`.
+1. Fill in the remaining stubbed Built-In Tools starting with `SkillInvoke` and `AgentLaunch`.
 2. Consolidate unit testing around the Anthropic JSON mapper to ensure token boundary robustness.
 3. Validate MCP lifecycle on non-stdio transports (e.g. WebSockets) if not fully tested.

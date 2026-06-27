@@ -1,82 +1,78 @@
 # Nakama
 
 ## Overview
-**Vision/Goal:** Nakama is a high-performance, dual-architecture AI coding assistant and agent infrastructure designed to bridge the gap between fast systems programming and flexible scripting, providing a secure, strict-sandboxed foundation for agentic workflows.
+**Vision/Goal:** Nakama is a high-performance, dual-architecture AI coding assistant and agent infrastructure that orchestrates autonomous AI agents by using a blistering-fast Rust primary engine for real-time API streaming and sandboxed tool execution, alongside a Python companion for state mirroring, dynamic prompt routing, and parity auditing.
 
 **Current Status:** Active Development (Version 0.1.0)
 
 ## Tech Stack
 **Language/Runtime:** Rust (Edition 2024), Python 3.10+
 
-**Frameworks/Libraries:** 
-- **Rust:** `tokio` (async runtime), `reqwest` (HTTP/SSE streams), `clap` (CLI), `serde`/`serde_json` (serialization), `rustyline` (REPL)
-- **Python:** Standard library (`python_companion`)
+**Frameworks/Libraries:** tokio (async), reqwest, serde, clap, rustyline (Rust); Standard library (Python)
 
-**Key Dependencies:** 
-- Model Context Protocol (MCP) for tool bridging.
-- Standardized OpenAI-compatible, Anthropic, DashScope, and xAI streaming API endpoints.
+**Key Dependencies:** OpenAI-Compatible APIs, NVIDIA NIM APIs, Anthropic APIs, Model Context Protocol (MCP)
 
 ## Directory Structure
 ```text
-nakama/
-├── Cargo.toml
-├── README.md
-├── python_companion/          # Porting scaffold & audit workspace
-│   ├── audit.py               # Parity auditing & coverage checks
-│   ├── inventory.py           # Command & tool inventories
-│   ├── main.py                # Python companion CLI entry
-│   ├── query.py               # Query simulation engine
-│   ├── routing.py             # Token-based prompt routing
-│   ├── session.py             # Session persistence logic
-│   └── transcript.py          # Mutable transcript store
-└── src/                       # Primary Rust Runtime
-    ├── bootstrap.rs           # Multi-phase startup pipeline
-    ├── cli.rs / subcommands.rs# Argument parsing & CLI dispatch
-    ├── compaction.rs          # Context window summarization engine
-    ├── config/                # Hierarchical configuration loading
-    ├── hook.rs                # Lifecycle events (Pre/Post tool use)
-    ├── mcp.rs                 # External tool bridging
-    ├── models.rs              # Model alias resolution
-    ├── path_scope.rs          # Security & directory traversal prevention
-    ├── permission.rs          # Hierarchical tool execution rules
-    ├── provider/              # HTTP client abstractions for LLM providers
-    ├── runtime.rs             # Multi-turn conversation loop
-    ├── session.rs             # JSONL state serialization
-    └── tools/                 # Built-in tool implementations
+.
+├── Cargo.toml              # Rust package and dependency manifest
+├── python_companion/       # Python workspace for routing and parity auditing
+│   ├── audit.py            # Parity auditing & coverage checks
+│   ├── inventory.py        # Command & tool inventories
+│   ├── main.py             # CLI entry point for companion
+│   ├── query.py            # Query simulation engine
+│   ├── routing.py          # Token-based prompt routing
+│   ├── session.py          # Session persistence logic
+│   └── transcript.py       # Mutable transcript store
+└── src/                    # Core Rust runtime
+    ├── bootstrap.rs        # Multi-phase startup pipeline
+    ├── cli.rs              # Argument parsing & CLI dispatch
+    ├── compaction.rs       # Context window summarization engine
+    ├── config/             # Hierarchical configuration logic
+    ├── data_contracts.rs   # Core structures and type boundaries
+    ├── mcp.rs              # Model Context Protocol bridge
+    ├── path_scope.rs       # Directory traversal prevention
+    ├── permission.rs       # Tool execution rules and interactive gates
+    ├── provider/           # HTTP client abstractions for LLM providers
+    ├── repl.rs             # Interactive Read-Eval-Print Loop logic
+    ├── runtime.rs          # Multi-turn conversation loop
+    ├── session.rs          # State serialization (.jsonl)
+    ├── sse.rs              # Server-Sent Events stream parser
+    ├── tools/              # Built-in tool implementations
+    └── worker_state.rs     # Worker state persistence
 ```
 
 ## Core Logic & Data Flow
-1. **Conversation Runtime & API Streaming:** 
-   User input is captured via a REPL or CLI argument. The Rust core routes the prompt, assembles a system instruction, performs context-window preflight checks (triggering compaction if necessary), and sends the request to the LLM provider. Responses are parsed via Server-Sent Events (SSE), extracting text blocks, tool invocations, and usage metrics.
-2. **Strict Permission & Tool Dispatch Engine:** 
-   When an LLM attempts to call a tool, the payload is intercepted by the Permission Engine. It extracts subject paths, expands globs/variables, and resolves them against canonical workspace roots to prevent directory escapes. The engine evaluates hierarchical rules (`DangerFullAccess`, `WorkspaceWrite`, `ReadOnly`) against the tool's required mode, falling back to an interactive prompter (`Prompt` mode) if escalation is required.
-3. **Companion Parity & Auditing (Python):** 
-   The Python companion acts as a decoupled porting scaffold. It reads the `.claw/sessions/` JSONL files and `worker-state.json` emitted by the Rust core, scores/routes prompts, simulates turn loops with budget constraints, and performs cross-language parity audits to verify feature implementation alignment against an archived reference workspace.
+1. **Interactive Loop & Streaming (Rust Core):** Data enters through the CLI or interactive REPL (`repl.rs`, `cli.rs`). The `runtime.rs` orchestrates the multi-turn conversational loop, routing requests to the appropriate LLM provider and streaming back responses in real-time via `sse.rs` (Server-Sent Events).
+2. **Tool Dispatch & Sandboxing:** When the LLM initiates a tool call (e.g., shell commands, filesystem I/O), it is intercepted by `mcp.rs` and built-in dispatchers (`tools/`). Before any code operation occurs, actions are validated against strict path boundaries (`path_scope.rs`) and permission levels (`permission.rs` - e.g., 'prompt' vs 'auto' modes) to prevent directory traversal and unauthorized escapes.
+3. **Session Persistence & Auditing (Dual-Architecture):** The Rust core continuously serializes conversational state into disk artifacts (`session.rs`, `worker_state.rs`). The Python companion workspace (`python_companion/`) acts as a secondary layer that reads this state for parity auditing (`audit.py`), prompt routing (`routing.py`), and query simulation without blocking the fast primary engine.
 
 ## Environment & Setup
 **Prerequisites:** 
-- Rust (Edition 2024)
+- Rust & Cargo (Edition 2024)
 - Python 3.10+
-- Applicable LLM API keys.
+- API Keys for preferred AI providers (e.g., `NVIDIA_API_KEY`, `ANTHROPIC_API_KEY`)
 
-**Environment Variables (`.env`):**
-- `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `NVIDIA_API_KEY`, `XAI_API_KEY`, or `DASHSCOPE_API_KEY` (depending on selected provider)
-- `URL` (Custom base URL, e.g., for NVIDIA NIM or local Ollama)
-- `NAKAMA_PERMISSION_MODE` (e.g., `prompt`, `allow`, `readonly`)
-- `CLAW_MODEL` (Overrides default model selection)
-
-**Start Commands:**
-```bash
-cargo build --release
-cargo run
+**Environment Variables:**
+Create a `.env` file in the root directory:
+```env
+NVIDIA_API_KEY=your_api_key_here
+URL=https://integrate.api.nvidia.com/v1
+NAKAMA_PERMISSION_MODE=prompt
 ```
 
+**Essential Start Commands:**
+- Build the Rust Core: `cargo build --release`
+- Run the Application (REPL): `cargo run`
+- Setup Python Companion: `cd python_companion && python main.py setupreport`
+
 ## Development Conventions
-- **Dual-Layer Architecture:** The Rust layer exclusively handles performance-critical I/O, strict state management, and permissions. The Python layer handles isolated prompt routing, auditing, and fallback query logic.
-- **Hierarchical Configuration:** Settings load sequentially from `~/.claw.json` → `~/.config/claw/settings.json` → `<repo>/.claw.json` → `<repo>/.claw/settings.local.json`.
-- **Stateless Tool Invocation:** Built-in tools and MCP servers are isolated. The system relies heavily on explicit lifecycle hooks (`PreToolUse`, `PostToolUse`) rather than shared memory.
+- **Dual-Architecture Separation:** High-performance, strict, and state-heavy logic resides in Rust (async via `tokio`); flexible prompt routing, simulation, and auditing are handled in Python.
+- **Strict Boundary Control:** AI actions never execute implicitly. All tool calls and filesystem operations must pass through explicit `path_scope` validations and interactive permission gates (Prompt mode).
+- **Data Contracts:** Communication between the Rust core and Python companion relies on frozen, serialized JSON artifacts (e.g., `.jsonl` session transcripts) rather than direct in-memory FFI, ensuring decoupled stability.
+- **Error Handling:** Centralized through `thiserror` (Rust) with strongly typed error variants across the system (`error.rs`, `error_handling.rs`).
 
 ## Known Issues / Debt
-- **JSON Key Brittleness in Permissions:** The permission rule engine extracts subjects by looking for hardcoded JSON keys (e.g., `command`, `file_path`, `url`). If an LLM hallucinates an unmapped parameter name, the rule may fail to evaluate correctly, requiring a fallback to generic string-matching.
-- **State Decoupling Latency:** Because the Python companion relies on parsing serialized JSONL session files rather than IPC or shared memory, rapid state mutations could theoretically cause race conditions if the companion reads before the Rust core fully flushes a write.
-- **Compaction Summarization Inflation:** The compaction engine summarizes discarded messages. If repeatedly triggered, older summaries might become overly dense or lose nuance, despite logic designed to flatten previous highlights.
+- **Token Limits vs. Compaction Fidelity:** The intelligent transcript compaction system (`compaction.rs`) automatically summarizes lengthy conversations to stay within model context limits, which may result in a loss of granular detail in extremely long, multi-turn sessions.
+- **Dual-State Synchronization:** Because the architecture splits responsibilities between Rust and Python through disk-based JSON artifacts, subtle race conditions or parsing desyncs can occur if the Python companion reads state while the Rust engine is mid-write.
+- **API Interoperability Churn:** Standardizing OpenAI-compatible chat completions and tool-calling payloads across disparate providers requires continuous adaptation of the `sse.rs` and `provider/` modules when upstream APIs change or diverge from standard SSE formats.

@@ -57,12 +57,20 @@ async fn main() {
         }
     }
 
+    let workspace_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+
+    // Step 2: Load Hierarchical Config
+    let app_config = crate::bootstrap::Bootstrap::load_config(&workspace_root);
+
     // Provider parsing
     let provider_name = std::env::var("NAKAMA_PROVIDER").unwrap_or_else(|_| "nim".to_string()).to_lowercase();
     let provider_config = match provider_name.as_str() {
         "anthropic" => {
             let api_key = std::env::var("ANTHROPIC_API_KEY").unwrap_or_default();
-            let model = std::env::var("NAKAMA_MODEL").unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
+            let mut model = std::env::var("NAKAMA_MODEL").unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
+            if let Some(resolved) = app_config.model_aliases.get(&model) {
+                model = resolved.clone();
+            }
             let _config = ProviderConfig {
                 base_url: "https://api.anthropic.com/v1".to_string(),
                 api_key,
@@ -84,7 +92,10 @@ async fn main() {
                 }
             };
             let base_url = std::env::var("URL").unwrap_or_else(|_| "https://integrate.api.nvidia.com/v1".to_string());
-            let model = std::env::var("NAKAMA_MODEL").unwrap_or_else(|_| "moonshotai/kimi-k2-5".to_string());
+            let mut model = std::env::var("NAKAMA_MODEL").unwrap_or_else(|_| "moonshotai/kimi-k2-5".to_string());
+            if let Some(resolved) = app_config.model_aliases.get(&model) {
+                model = resolved.clone();
+            }
             ProviderConfig {
                 base_url,
                 api_key,
@@ -108,8 +119,6 @@ async fn main() {
         .parse::<usize>()
         .unwrap_or(32000);
 
-    let workspace_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-
     // Initialize the conversation runtime
     let config = RuntimeConfig {
         base_dir: session_dir,
@@ -118,6 +127,7 @@ async fn main() {
         workspace_root,
         stage_permission_mode,
         compaction_threshold,
+        app_config,
     };
     
     let mut runtime = ConversationRuntime::new(config, session_id_arg.as_deref());

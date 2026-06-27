@@ -55,3 +55,12 @@ impl BootstrapPipeline {
         }
     }
 }
+
+pub struct Bootstrap;
+
+impl Bootstrap {
+    pub fn load_config(workspace_root: &std::path::Path) -> crate::config::AppConfig {
+        crate::config::load_merged_config(workspace_root)
+    }
+}
+

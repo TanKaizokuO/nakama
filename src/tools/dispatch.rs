@@ -88,7 +88,7 @@ pub async fn dispatch_tool(name: &str, arguments_str: &str, workspace_root: &Pat
     };
 
     let result = match name {
-        "shell" => tool_shell(&args).await,
+        "shell" => tool_shell(&args, workspace_root).await,
         "file_read" => tool_file_read(&args, workspace_root).await,
         "file_write" => tool_file_write(&args, workspace_root).await,
         "grep_search" => tool_grep_search(&args, workspace_root).await,
@@ -102,9 +102,18 @@ pub async fn dispatch_tool(name: &str, arguments_str: &str, workspace_root: &Pat
     }
 }
 
-async fn tool_shell(args: &Value) -> Result<String, String> {
+async fn tool_shell(args: &Value, workspace_root: &Path) -> Result<String, String> {
     let command = args.get("command").and_then(|v| v.as_str()).ok_or("error: missing 'command' parameter")?;
     let timeout_ms = args.get("timeout_ms").and_then(|v| v.as_u64()).unwrap_or(10000);
+
+    let tokens = crate::path_scope::tokenize_payload(command);
+    let paths = crate::path_scope::extract_paths(&tokens);
+    for path in paths {
+        let validation = crate::path_scope::validate_path(&path, &[workspace_root.to_path_buf()], workspace_root);
+        if let crate::path_scope::ValidationResult::Denied { reason, candidate, resolved } = validation {
+            return Err(format!("error: path scope denial for '{}': {} (resolved to {})", candidate, reason, resolved));
+        }
+    }
 
     let child = tokio::process::Command::new("sh")
         .arg("-c")

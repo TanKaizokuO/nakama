@@ -1,200 +1,201 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
-#[serde(rename_all = "PascalCase")]
-pub struct Config {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model_aliases: Option<HashMap<String, String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mcp_servers: Option<HashMap<String, serde_json::Value>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub hooks: Option<HashMap<String, serde_json::Value>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub permission_rules: Option<PermissionRules>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub provider_settings: Option<ProviderSettings>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub plugin_config: Option<Vec<serde_json::Value>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub feature_flags: Option<HashMap<String, bool>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub rules_import: Option<RulesImport>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
-#[serde(rename_all = "PascalCase")]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PermissionRules {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub allow: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub deny: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ask: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub denied_tools: Option<Vec<String>>,
+    #[serde(default)]
+    pub allow: Vec<String>,
+    #[serde(default)]
+    pub deny: Vec<String>,
+    #[serde(default)]
+    pub ask: Vec<String>,
+    #[serde(default)]
+    pub denied_tools: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
-#[serde(rename_all = "PascalCase")]
-pub struct ProviderSettings {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub timeout: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub fallback_config: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(untagged)]
-pub enum RulesImport {
-    Simple(String),
-    Frameworks(Vec<String>),
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RulesImportMode {
+    #[serde(rename = "auto")]
+    Auto,
+    #[serde(rename = "none")]
+    None,
+    #[serde(untagged)]
+    Explicit(Vec<String>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct PrecedenceMetadata {
-    pub file_path: String,
-    pub precedence_rank: usize,
-    pub wins_for_keys: Vec<String>,
-    pub shadowed_keys: Vec<String>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct MergedConfig {
-    pub config: Config,
-    pub metadata: Vec<PrecedenceMetadata>,
-}
-
-pub fn find_git_root(start_dir: &Path) -> Option<PathBuf> {
-    let mut current = start_dir.to_path_buf();
-    loop {
-        if current.join(".git").exists() {
-            return Some(current);
-        }
-        if !current.pop() {
-            break;
-        }
-    }
-    None
-}
-
-/// Discovers the paths of the 5 configuration files in hierarchical order.
-pub fn get_config_paths(cwd: &Path) -> Vec<(usize, PathBuf)> {
-    let mut paths = Vec::new();
-
-    let home = home::home_dir();
+pub struct AppConfig {
+    #[serde(default)]
+    pub model_aliases: HashMap<String, String>,
     
-    // Level 1: ~/.nakama.json
-    if let Some(h) = &home {
-        paths.push((1, h.join(".nakama.json")));
-    }
+    #[serde(default)]
+    pub mcp_servers: HashMap<String, serde_json::Value>,
+    
+    #[serde(default)]
+    pub hooks: HashMap<String, serde_json::Value>,
+    
+    #[serde(default)]
+    pub permission_rules: Option<PermissionRules>,
+    
+    #[serde(default)]
+    pub provider_settings: Option<serde_json::Value>,
+    
+    #[serde(default)]
+    pub feature_flags: Option<serde_json::Value>,
+    
+    #[serde(default)]
+    pub rules_import: Option<RulesImportMode>,
 
-    // Level 2: ~/.config/nakama/settings.json
-    if let Some(h) = &home {
-        paths.push((2, h.join(".config").join("nakama").join("settings.json")));
-    }
-
-    // Determine repo root or fallback to working directory
-    let repo_root = find_git_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
-
-    // Level 3: <repo>/.nakama.json
-    paths.push((3, repo_root.join(".nakama.json")));
-
-    // Level 4: <repo>/.nakama/settings.json
-    paths.push((4, repo_root.join(".nakama").join("settings.json")));
-
-    // Level 5: <repo>/.nakama/settings.local.json
-    paths.push((5, repo_root.join(".nakama").join("settings.local.json")));
-
-    paths
+    #[serde(skip)]
+    pub instruction_content: Option<String>,
 }
 
-/// Loads and merges the 5-level configuration files.
-pub fn load_merged_config(cwd: &Path) -> Result<MergedConfig, String> {
-    let config_paths = get_config_paths(cwd);
-    let mut loaded_files = Vec::new();
+impl AppConfig {
+    pub fn merge(&mut self, other: AppConfig) {
+        self.model_aliases.extend(other.model_aliases);
+        self.mcp_servers.extend(other.mcp_servers);
+        self.hooks.extend(other.hooks);
 
-    for (rank, path) in config_paths {
-        if path.exists() {
-            let content = std::fs::read_to_string(&path)
-                .map_err(|e| format!("Failed to read config file {}: {}", path.display(), e))?;
-            
-            let val = serde_json::from_str::<serde_json::Value>(&content)
-                .map_err(|e| format!("config_parse_error at {}: line {} col {}", path.display(), e.line(), e.column()))?;
-            
-            if let serde_json::Value::Object(obj) = val {
-                loaded_files.push((rank, path.display().to_string(), obj));
+        if let Some(other_rules) = other.permission_rules {
+            if let Some(mut my_rules) = self.permission_rules.take() {
+                my_rules.allow.extend(other_rules.allow);
+                my_rules.deny.extend(other_rules.deny);
+                my_rules.ask.extend(other_rules.ask);
+                my_rules.denied_tools.extend(other_rules.denied_tools);
+                self.permission_rules = Some(my_rules);
             } else {
-                return Err(format!("config_parse_error: Config at {} is not a JSON object", path.display()));
-            }
-        }
-    }
-
-    // Key-level merge with metadata tracking
-    let mut merged_map = serde_json::Map::new();
-    let mut key_owners: HashMap<String, (usize, String)> = HashMap::new(); // key -> (rank, file_path)
-    let mut key_history: HashMap<String, Vec<(usize, String)>> = HashMap::new(); // key -> list of (rank, file_path)
-
-    for (rank, path, obj) in &loaded_files {
-        for key in obj.keys() {
-            key_history.entry(key.clone()).or_default().push((*rank, path.clone()));
-            
-            let should_update = match key_owners.get(key) {
-                Some(&(old_rank, _)) => *rank > old_rank,
-                None => true,
-            };
-
-            if should_update {
-                key_owners.insert(key.clone(), (*rank, path.clone()));
-            }
-        }
-    }
-
-    // Build the merged object
-    for (key, &(rank, _)) in &key_owners {
-        // Find the obj with this rank and get value
-        for (r, _, obj) in &loaded_files {
-            if *r == rank {
-                if let Some(val) = obj.get(key) {
-                    merged_map.insert(key.clone(), val.clone());
-                }
-            }
-        }
-    }
-
-    // Build metadata records
-    let mut metadata = Vec::new();
-    for (rank, path, obj) in &loaded_files {
-        let mut wins_for_keys = Vec::new();
-        let mut shadowed_keys = Vec::new();
-
-        for key in obj.keys() {
-            if let Some(&(owner_rank, _)) = key_owners.get(key) {
-                if owner_rank == *rank {
-                    wins_for_keys.push(key.clone());
-                } else if owner_rank > *rank {
-                    shadowed_keys.push(key.clone());
-                }
+                self.permission_rules = Some(other_rules);
             }
         }
 
-        metadata.push(PrecedenceMetadata {
-            file_path: path.clone(),
-            precedence_rank: *rank,
-            wins_for_keys,
-            shadowed_keys,
-        });
+        if other.provider_settings.is_some() {
+            self.provider_settings = other.provider_settings;
+        }
+
+        if other.feature_flags.is_some() {
+            self.feature_flags = other.feature_flags;
+        }
+
+        if other.rules_import.is_some() {
+            self.rules_import = other.rules_import;
+        }
     }
-
-    let config_val = serde_json::Value::Object(merged_map);
-    let config = serde_json::from_value::<Config>(config_val)
-        .map_err(|e| format!("Failed to convert merged JSON to Config structure: {}", e))?;
-
-    Ok(MergedConfig { config, metadata })
 }
 
-pub mod precedence;
-pub mod aliases;
+pub fn load_merged_config(workspace_root: &Path) -> AppConfig {
+    let mut config = AppConfig::default();
+
+    let mut paths = Vec::new();
+    
+    // 1. ~/.claw.json
+    // 2. ~/.config/claw/settings.json
+    if let Some(home) = home::home_dir() {
+        paths.push(home.join(".claw.json"));
+        paths.push(home.join(".config/claw/settings.json"));
+    }
+
+    // 3. <repo>/.claw.json
+    // 4. <repo>/.claw/settings.json
+    // 5. <repo>/.claw/settings.local.json
+    paths.push(workspace_root.join(".claw.json"));
+    paths.push(workspace_root.join(".claw/settings.json"));
+    paths.push(workspace_root.join(".claw/settings.local.json"));
+
+    for path in paths {
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(parsed) = serde_json::from_str::<AppConfig>(&content) {
+                    config.merge(parsed);
+                }
+            }
+        }
+    }
+
+    // Discover instructions
+    config.instruction_content = discover_instructions(workspace_root);
+
+    config
+}
+
+fn discover_instructions(workspace_root: &Path) -> Option<String> {
+    let mut instructions = Vec::new();
+
+    // The order determines priority
+    let explicit_paths = vec![
+        "CLAUDE.md",
+        "CLAW.md",
+        "AGENTS.md",
+        ".claw/CLAUDE.md",
+        ".claude/CLAUDE.md",
+        ".claw/instructions.md",
+    ];
+
+    for path_str in explicit_paths {
+        let path = workspace_root.join(path_str);
+        if path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                instructions.push(content);
+            }
+        }
+    }
+
+    // 5. Sorted files from .claw/rules/
+    let mut rules_files = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(workspace_root.join(".claw/rules")) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    if ext == "md" || ext == "txt" || ext == "mdc" {
+                        rules_files.push(path);
+                    }
+                }
+            }
+        }
+    }
+    rules_files.sort();
+    for path in rules_files {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            instructions.push(content);
+        }
+    }
+
+    // 6. Sorted files from .claw/rules.local/
+    let mut local_rules_files = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(workspace_root.join(".claw/rules.local")) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    if ext == "md" || ext == "txt" || ext == "mdc" {
+                        local_rules_files.push(path);
+                    }
+                }
+            }
+        }
+    }
+    local_rules_files.sort();
+    for path in local_rules_files {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            instructions.push(content);
+        }
+    }
+
+    if instructions.is_empty() {
+        None
+    } else {
+        Some(instructions.join("\n---\n"))
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    #[test]
+    fn test_merge() {
+        let config = load_merged_config(&PathBuf::from("."));
+        println!("{:?}", config.permission_rules.unwrap().denied_tools);
+    }
+}

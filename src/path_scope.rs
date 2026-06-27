@@ -278,6 +278,20 @@ pub fn validate_path(
 }
 
 fn validate_single_path(path: &Path, workspace_roots: &[PathBuf]) -> ValidationResult {
+    let path_str = path.to_string_lossy();
+    if cfg!(unix) {
+        if path_str.starts_with("\\\\") 
+            || (path_str.len() >= 3 && path_str.chars().next().unwrap().is_alphabetic() && &path_str[1..3] == ":\\")
+            || (path_str.len() >= 3 && path_str.chars().next().unwrap().is_alphabetic() && &path_str[1..3] == ":/") 
+        {
+            return ValidationResult::Denied {
+                candidate: path_str.to_string(),
+                resolved: path_str.to_string(),
+                reason: "Windows or UNC paths are not allowed on POSIX workspace roots".to_string(),
+            };
+        }
+    }
+
     let canonical = canonicalize_path(path);
 
     for root in workspace_roots {
@@ -294,6 +308,7 @@ fn validate_single_path(path: &Path, workspace_roots: &[PathBuf]) -> ValidationR
     ValidationResult::Denied {
         candidate: path.to_string_lossy().to_string(),
         resolved: canonical.to_string_lossy().to_string(),
-        reason: "Path escapes workspace containment boundaries".to_string(),
+        reason: "path resolves outside workspace scope".to_string(),
     }
 }
+

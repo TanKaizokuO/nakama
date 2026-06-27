@@ -40,20 +40,16 @@ impl PermissionEngine {
         let tool_name_lower = tool_name.to_lowercase();
 
         // 1. Check denied-tools list
-        if let Some(denied) = &self.rules.denied_tools {
-            for denied_tool in denied {
-                if denied_tool.to_lowercase() == tool_name_lower {
-                    return PermissionDecision::Deny("denied by denied_tools configuration".to_string());
-                }
+        for denied_tool in &self.rules.denied_tools {
+            if denied_tool.to_lowercase() == tool_name_lower {
+                return PermissionDecision::Deny("denied by denied_tools configuration".to_string());
             }
         }
 
         // 2. Check deny rules
-        if let Some(deny_rules) = &self.rules.deny {
-            for rule in deny_rules {
-                if Self::match_rule(rule, &tool_name_lower, subject) {
-                    return PermissionDecision::Deny(format!("denied by deny rule: {}", rule));
-                }
+        for rule in &self.rules.deny {
+            if Self::match_rule(rule, &tool_name_lower, subject) {
+                return PermissionDecision::Deny(format!("denied by deny rule: {}", rule));
             }
         }
 
@@ -80,20 +76,16 @@ impl PermissionEngine {
         }
 
         // 5. Check ask rules
-        if let Some(ask_rules) = &self.rules.ask {
-            for rule in ask_rules {
-                if Self::match_rule(rule, &tool_name_lower, subject) {
-                    return PermissionDecision::Prompt(format!("matched ask rule: {}", rule));
-                }
+        for rule in &self.rules.ask {
+            if Self::match_rule(rule, &tool_name_lower, subject) {
+                return PermissionDecision::Prompt(format!("matched ask rule: {}", rule));
             }
         }
 
         // 6. Check allow rules
-        if let Some(allow_rules) = &self.rules.allow {
-            for rule in allow_rules {
-                if Self::match_rule(rule, &tool_name_lower, subject) {
-                    return PermissionDecision::Permit;
-                }
+        for rule in &self.rules.allow {
+            if Self::match_rule(rule, &tool_name_lower, subject) {
+                return PermissionDecision::Permit;
             }
         }
 
@@ -224,9 +216,9 @@ mod tests {
     #[test]
     fn test_evaluation_order() {
         let mut rules = PermissionRules::default();
-        rules.denied_tools = Some(vec!["BadTool".to_string()]);
-        rules.deny = Some(vec!["FileWrite(/root/*)".to_string()]);
-        rules.allow = Some(vec!["FileWrite(/tmp/*)".to_string()]);
+        rules.denied_tools = vec!["BadTool".to_string()];
+        rules.deny = vec!["FileWrite(/root/*)".to_string()];
+        rules.allow = vec!["FileWrite(/tmp/*)".to_string()];
 
         let engine = PermissionEngine::new(PermissionMode::ReadOnly, rules);
 

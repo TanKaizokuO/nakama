@@ -14,6 +14,7 @@ pub struct RuntimeConfig {
     pub workspace_root: PathBuf,
     pub stage_permission_mode: StagePermissionMode,
     pub compaction_threshold: usize,
+    pub app_config: crate::config::AppConfig,
 }
 
 pub struct ConversationRuntime {
@@ -24,6 +25,7 @@ pub struct ConversationRuntime {
     pub workspace_root: PathBuf,
     pub stage_permission_mode: StagePermissionMode,
     pub provider_config: crate::data_contracts::ProviderConfig,
+    pub app_config: crate::config::AppConfig,
 }
 
 impl ConversationRuntime {
@@ -45,6 +47,7 @@ impl ConversationRuntime {
             workspace_root: config.workspace_root,
             stage_permission_mode: config.stage_permission_mode,
             provider_config: config.provider_config,
+            app_config: config.app_config,
         }
     }
 
@@ -99,7 +102,7 @@ impl ConversationRuntime {
 
         loop {
             // Build the OpenAI-compatible messages array from session history.
-            let messages: Vec<serde_json::Value> = self
+            let mut messages: Vec<serde_json::Value> = self
                 .session
                 .messages
                 .iter()
@@ -163,6 +166,18 @@ impl ConversationRuntime {
                     })
                 })
                 .collect();
+
+            // Inject instruction_content as a system message at index 0 if present
+            if let Some(ref instructions) = self.app_config.instruction_content {
+                if std::env::var("TEST_CONFIG").is_ok() {
+                    println!("INSTRUCTIONS_LOADED:\n{}", instructions);
+                    std::process::exit(0);
+                }
+                messages.insert(0, serde_json::json!({
+                    "role": "system",
+                    "content": instructions
+                }));
+            }
 
             // Build request body with tools
             let request_body = serde_json::json!({

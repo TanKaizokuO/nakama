@@ -2,12 +2,25 @@
 
 ## 1. Func_spec_Nakama.md Alignment
 - `[x]` **CLI Entry Points & Commands**: Implemented (e.g., via `cli.rs`, `subcommands.rs`, `slash_commands.rs`).
-- `[~]` **Provider API Interface & Streaming**: Partially implemented. Certain providers (like NVIDIA NIM and OpenAI-compatible) and SSE parsing are functional, but others remain incomplete.
+- `[x]` **Provider API Interface & Streaming**: Fully implemented (NVIDIA NIM, OpenAI, Anthropic, DashScope, xAI).
 - `[~]` **Conversation Runtime (including compaction)**: Partially implemented. The conversational loop is established, but compaction relies on a hardcoded formatting placeholder rather than true generative summaries.
 - `[~]` **Permission Engine & Path Scope Validation**: Partially implemented. Basic path resolution is present, but missing a strict POSIX tokenizer and fully realized hierarchical permissions.
 - `[x]` **Tool System & MCP Bridge**: Implemented (via `tools/` directory and `mcp.rs`).
 - `[x]` **Session Persistence & Worker State**: Implemented (via `session.rs` and `worker_state.rs` producing `.jsonl` and `worker-state.json`).
 - `[~]` **Configuration Hierarchy & Instruction Discovery**: Partially implemented. Foundation exists in `config/`, but parsing for `.claw/settings.json` is missing.
+
+### Active Stage
+**Stage 5: Anthropic Provider & Routing (COMPLETED)**
+- [x] Wire `AccumulatorState` into live streaming path for Anthropic in `runtime.rs`
+- [x] Unify response structs so `runtime.rs` receives standard format regardless of provider
+- [x] Implement deterministic provider routing based on model keywords (`claude-` vs `nim-`)
+- [x] Verify routing, fallback, and tool-call payload formats for both providers
+
+### Next Up
+**Stage 6: Multi-Turn Execution**
+- Implement tool-loop mechanics.
+- Add session file truncation handling.
+- Verify multi-turn loops.
 
 ## 2. Source File Inventory
 

@@ -1,100 +1,16 @@
+import re
+
+with open("src/runtime.rs", "r") as f:
+    content = f.read()
+
+new_exec = """
 pub const DEFAULT_MAX_TOKENS: u32 = 4096;
 
-use crate::session::Session;
-use crate::worker_state::WorkerStateManager;
-use crate::data_contracts::WorkerState;
-use crate::compaction::{CompactionEngine, CompactionConfig};
-use crate::data_contracts::{MessageRole, SessionMessageRecord, ContentBlock, StagePermissionMode};
-use crate::nim_accumulator::NimAccumulator;
-use std::io::Write;
-use std::path::PathBuf;
-
-pub struct RuntimeConfig {
-    pub base_dir: PathBuf,
-    pub provider_config: crate::data_contracts::ProviderConfig,
-    pub permission_mode: String,
-    pub workspace_root: PathBuf,
-    pub stage_permission_mode: StagePermissionMode,
-    pub compaction_threshold: usize,
-    pub app_config: crate::config::AppConfig,
-}
-
-pub struct ConversationRuntime {
-    pub session: Session,
-    pub worker_state_manager: WorkerStateManager,
-    pub compaction_engine: CompactionEngine,
-    pub turn_count: usize,
-    pub workspace_root: PathBuf,
-    pub stage_permission_mode: StagePermissionMode,
-    pub provider_config: crate::data_contracts::ProviderConfig,
-    pub app_config: crate::config::AppConfig,
-}
-
-impl ConversationRuntime {
-    pub fn new(config: RuntimeConfig, session_id: Option<&str>) -> Self {
-        let base_dir = config.base_dir.clone();
-        let model = config.provider_config.model.clone();
-        
-        let session = if let Some(sid) = session_id {
-            Session::resume(base_dir.clone(), sid).unwrap_or_else(|_| Session::new(base_dir.clone(), model.clone(), config.permission_mode.clone()))
-        } else {
-            Session::new(base_dir.clone(), model, config.permission_mode.clone())
-        };
-
-        Self {
-            session,
-            worker_state_manager: WorkerStateManager::new(base_dir),
-            compaction_engine: CompactionEngine::new(CompactionConfig { max_budget: config.compaction_threshold, ..Default::default() }),
-            turn_count: 0,
-            workspace_root: config.workspace_root,
-            stage_permission_mode: config.stage_permission_mode,
-            provider_config: config.provider_config,
-            app_config: config.app_config,
-        }
-    }
-
-    pub fn estimate_tokens(&self) -> usize {
-        self.session.messages.iter()
-            .filter(|m| m.role == MessageRole::Assistant)
-            .filter_map(|m| m.usage)
-            .map(|u| (u.input_tokens + u.output_tokens) as usize)
-            .sum()
-    }
-
-    /// Real streaming provider call to NVIDIA NIM (OpenAI-compatible).
-    ///
-    /// Sends user input to the NIM endpoint, streams the response to stdout
-    /// chunk by chunk, then persists both the user and assistant turns to JSONL.
-    pub async fn execute_turn_async(
-        &mut self,
-        user_input: &str,
-    ) {
-        // Step 1: Skip empty input
-        if user_input.trim().is_empty() {
-            return;
-        }
-
-        // Compaction check before adding new message
-        let token_estimate = self.estimate_tokens();
-        if token_estimate > self.compaction_engine.threshold() {
-            if let Ok(Some(_record)) = self.compaction_engine.compact(&mut self.session.messages, false) {
-                let system_msg = SessionMessageRecord {
-                    role: MessageRole::User,
-                    content: vec![ContentBlock::Text {
-                        text: "[Context compacted. Prior conversation summarised above.]".to_string(),
-                    }],
-                    usage: None,
-                    timestamp: chrono::Utc::now().to_rfc3339(),
-                    tool_call_id: None,
-                };
-                self.session.messages.push(system_msg);
-            }
-        }
-
-        // Persist User Turn initially
+impl Runtime {
+    pub async fn execute_turn_async(&mut self) {
         let user_record = SessionMessageRecord {
             role: MessageRole::User,
-            content: vec![ContentBlock::Text { text: user_input.to_string() }],
+            content: vec![ContentBlock::Text { text: self.app_config.initial_prompt.clone() }],
             usage: None,
             timestamp: chrono::Utc::now().to_rfc3339(),
             tool_call_id: None,
@@ -107,7 +23,7 @@ impl ConversationRuntime {
             
             let mut request_body = serde_json::Map::new();
             request_body.insert("model".to_string(), serde_json::json!(self.provider_config.model));
-            request_body.insert("max_tokens".to_string(), serde_json::json!(crate::runtime::DEFAULT_MAX_TOKENS));
+            request_body.insert("max_tokens".to_string(), serde_json::json!(DEFAULT_MAX_TOKENS));
             request_body.insert("stream".to_string(), serde_json::json!(true));
 
             if !is_anthropic {
@@ -116,7 +32,7 @@ impl ConversationRuntime {
 
             if let Some(ref instructions) = self.app_config.instruction_content {
                 if std::env::var("TEST_CONFIG").is_ok() {
-                    println!("INSTRUCTIONS_LOADED:\n{}", instructions);
+                    println!("INSTRUCTIONS_LOADED:\\n{}", instructions);
                     std::process::exit(0);
                 }
                 if is_anthropic {
@@ -346,7 +262,7 @@ impl ConversationRuntime {
                 let chunk_str = String::from_utf8_lossy(&chunk_bytes);
                 line_buffer.push_str(&chunk_str);
 
-                while let Some(newline_pos) = line_buffer.find('\n') {
+                while let Some(newline_pos) = line_buffer.find('\\n') {
                     let line = line_buffer[..newline_pos].trim().to_string();
                     line_buffer = line_buffer[newline_pos + 1..].to_string();
 
@@ -371,7 +287,7 @@ impl ConversationRuntime {
                                     }
                                     anthropic_accumulator.transition(event);
                                 }
-                                Err(_) => {
+                                Err(e) => {
                                     // Silently ignore unrecognized events
                                 }
                             }
@@ -396,10 +312,7 @@ impl ConversationRuntime {
             }
 
             let provider_result = if is_anthropic {
-                {
-                println!("DEBUG anthropic_accumulator: {:#?}", &anthropic_accumulator);
                 anthropic_accumulator.into_provider_turn_result()
-            }
             } else {
                 nim_accumulator.into_provider_turn_result()
             };
@@ -409,7 +322,7 @@ impl ConversationRuntime {
             if is_tool_call {
                 if let Some(tc) = provider_result.tool_calls.first() {
                     let args_str = serde_json::to_string(&tc.input).unwrap_or_default();
-                    println!("\n[tool: {}({})]", tc.name, args_str);
+                    println!("\\n[tool: {}({})]", tc.name, args_str);
                     
                     let mut is_denied = false;
                     
@@ -485,23 +398,9 @@ impl ConversationRuntime {
             }
         }
     }
+"""
 
-    pub fn persist_session(&mut self) {
-        if let Err(e) = self.session.save() {
-            eprintln!("Failed to save session: {}", e);
-        }
+content = re.sub(r'impl Runtime \{\s*pub async fn execute_turn_async\(&mut self\) \{.*?\n    pub fn persist_session', new_exec + '\n    pub fn persist_session', content, flags=re.DOTALL)
 
-        self.turn_count += 1;
-        if self.turn_count == 1 {
-            let state = WorkerState {
-                worker_id: uuid::Uuid::new_v4().to_string(),
-                session_id: self.session.metadata.session_id.clone(),
-                model: self.session.metadata.model.clone(),
-                permission_mode: self.session.metadata.permission_mode.clone(),
-            };
-            if let Err(e) = self.worker_state_manager.write_state(&state) {
-                eprintln!("Failed to write worker state: {}", e);
-            }
-        }
-    }
-}
+with open("src/runtime.rs", "w") as f:
+    f.write(content)

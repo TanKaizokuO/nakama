@@ -121,3 +121,18 @@ pub struct ProviderConfig {
     pub auth_header: AuthHeader,
 }
 
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AccumulatedToolCall {
+    pub id: String,
+    pub name: String,
+    pub input: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProviderTurnResult {
+    pub text: String,
+    pub tool_calls: Vec<AccumulatedToolCall>,
+    pub stop_reason: Option<String>,
+    pub usage: Option<UsageRecord>,
+}

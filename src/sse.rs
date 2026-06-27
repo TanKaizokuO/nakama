@@ -3,11 +3,15 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type")]
 pub enum DeltaPayload {
+    #[serde(rename = "text_delta")]
     Text { text: String },
-    Json { json: String },
+    #[serde(rename = "input_json_delta")]
+    Json { partial_json: String },
+    #[serde(rename = "thinking_delta")]
     Thinking { thinking: String },
+    #[serde(rename = "signature_delta")]
     Signature { signature: String },
 }
 
@@ -139,7 +143,7 @@ impl AccumulatorState {
                             (OutputContentBlock::TextContent { text }, DeltaPayload::Text { text: fragment }) => {
                                 text.push_str(&fragment);
                             }
-                            (OutputContentBlock::ToolInvocation { .. }, DeltaPayload::Json { json: fragment }) => {
+                            (OutputContentBlock::ToolInvocation { .. }, DeltaPayload::Json { partial_json: fragment }) => {
                                 tool_inputs.entry(index).or_default().push_str(&fragment);
                             }
                             (OutputContentBlock::ThinkingContent { thinking, .. }, DeltaPayload::Thinking { thinking: fragment }) => {
@@ -220,56 +224,161 @@ impl AccumulatorState {
             partial_response: partial,
         };
     }
+
+    pub fn into_provider_turn_result(self) -> crate::data_contracts::ProviderTurnResult {
+        match self {
+            AccumulatorState::Complete(response) => {
+                let mut text = String::new();
+                let mut tool_calls = Vec::new();
+                
+                for block in response.content_blocks {
+                    match block {
+                        OutputContentBlock::TextContent { text: t } => {
+                            text.push_str(&t);
+                        }
+                        OutputContentBlock::ToolInvocation { id, name, input } => {
+                            tool_calls.push(crate::data_contracts::AccumulatedToolCall {
+                                id,
+                                name,
+                                input,
+                            });
+                        }
+                        _ => {}
+                    }
+                }
+                
+                crate::data_contracts::ProviderTurnResult {
+                    text,
+                    tool_calls,
+                    stop_reason: response.stop_reason,
+                    usage: Some(crate::data_contracts::UsageRecord {
+                        input_tokens: response.token_usage.input_tokens,
+                        output_tokens: response.token_usage.output_tokens,
+                        cache_creation_tokens: response.token_usage.cache_creation_tokens,
+                        cache_read_tokens: response.token_usage.cache_read_tokens,
+                    }),
+                }
+            }
+            _ => {
+                crate::data_contracts::ProviderTurnResult {
+                    text: String::new(),
+                    tool_calls: vec![],
+                    stop_reason: None,
+                    usage: None,
+                }
+            }
+        }
+    }
 }
 
 pub fn parse_sse_event(event_name: &str, data: &str) -> Result<SSEEvent, serde_json::Error> {
+    let data_val = serde_json::from_str::<serde_json::Value>(data)?;
+
     match event_name {
-        "session_start" => {
-            let response = serde_json::from_str::<MessageResponse>(data)?;
+        "message_start" => {
+            let msg_val = &data_val["message"];
+            let response_id = msg_val["id"].as_str().unwrap_or_default().to_string();
+            let role = msg_val["role"].as_str().unwrap_or("assistant").to_string();
+            let model_used = msg_val["model"].as_str().unwrap_or_default().to_string();
+            
+            let input_tokens = msg_val["usage"]["input_tokens"].as_u64().unwrap_or(0) as u32;
+            let cache_creation_tokens = msg_val["usage"]["cache_creation_input_tokens"].as_u64().unwrap_or(0) as u32;
+            let cache_read_tokens = msg_val["usage"]["cache_read_input_tokens"].as_u64().unwrap_or(0) as u32;
+
+            let response = MessageResponse {
+                response_id,
+                role,
+                content_blocks: Vec::new(),
+                model_used,
+                stop_reason: None,
+                token_usage: TokenUsage {
+                    input_tokens,
+                    output_tokens: 0,
+                    cache_creation_tokens,
+                    cache_read_tokens,
+                },
+            };
             Ok(SSEEvent::SessionStart { response })
         }
-        "content_block_begin" => {
-            #[derive(Deserialize)]
-            struct BeginPayload {
-                index: usize,
-                block: OutputContentBlock,
-            }
-            let payload = serde_json::from_str::<BeginPayload>(data)?;
-            Ok(SSEEvent::ContentBlockBegin {
-                index: payload.index,
-                block: payload.block,
-            })
+        "content_block_start" => {
+            let index = data_val["index"].as_u64().unwrap_or(0) as usize;
+            let block_val = &data_val["content_block"];
+            let block_type = block_val["type"].as_str().unwrap_or("text");
+            
+            let block = match block_type {
+                "text" => {
+                    let text = block_val["text"].as_str().unwrap_or_default().to_string();
+                    OutputContentBlock::TextContent { text }
+                }
+                "tool_use" => {
+                    let id = block_val["id"].as_str().unwrap_or_default().to_string();
+                    let name = block_val["name"].as_str().unwrap_or_default().to_string();
+                    let input = block_val["input"].clone();
+                    OutputContentBlock::ToolInvocation { id, name, input }
+                }
+                "thinking" => {
+                    let thinking = block_val["thinking"].as_str().unwrap_or_default().to_string();
+                    let signature = block_val["signature"].as_str().map(|s| s.to_string());
+                    OutputContentBlock::ThinkingContent { thinking, signature }
+                }
+                "redacted_thinking" => {
+                    let data = block_val["data"].as_str().unwrap_or_default().to_string();
+                    OutputContentBlock::RedactedThinking { data }
+                }
+                _ => OutputContentBlock::TextContent { text: String::new() },
+            };
+
+            Ok(SSEEvent::ContentBlockBegin { index, block })
         }
         "content_block_delta" => {
-            #[derive(Deserialize)]
-            struct DeltaWrap {
-                index: usize,
-                delta: DeltaPayload,
-            }
-            let payload = serde_json::from_str::<DeltaWrap>(data)?;
-            Ok(SSEEvent::ContentBlockDelta {
-                index: payload.index,
-                delta: payload.delta,
-            })
+            let index = data_val["index"].as_u64().unwrap_or(0) as usize;
+            let delta_val = &data_val["delta"];
+            let delta_type = delta_val["type"].as_str().unwrap_or("text_delta");
+            
+            let delta = match delta_type {
+                "text_delta" => {
+                    let text = delta_val["text"].as_str().unwrap_or_default().to_string();
+                    DeltaPayload::Text { text }
+                }
+                "input_json_delta" => {
+                    let json = delta_val["partial_json"].as_str().unwrap_or_default().to_string();
+                    DeltaPayload::Json { partial_json: json }
+                }
+                "thinking_delta" => {
+                    let thinking = delta_val["thinking"].as_str().unwrap_or_default().to_string();
+                    DeltaPayload::Thinking { thinking }
+                }
+                "signature_delta" => {
+                    let signature = delta_val["signature"].as_str().unwrap_or_default().to_string();
+                    DeltaPayload::Signature { signature }
+                }
+                _ => DeltaPayload::Text { text: String::new() },
+            };
+
+            Ok(SSEEvent::ContentBlockDelta { index, delta })
         }
-        "content_block_end" => {
-            #[derive(Deserialize)]
-            struct EndPayload {
-                index: usize,
-            }
-            let payload = serde_json::from_str::<EndPayload>(data)?;
-            Ok(SSEEvent::ContentBlockEnd { index: payload.index })
+        "content_block_stop" => {
+            let index = data_val["index"].as_u64().unwrap_or(0) as usize;
+            Ok(SSEEvent::ContentBlockEnd { index })
         }
         "message_delta" => {
-            let delta = serde_json::from_str::<MessageDeltaPayload>(data)?;
-            Ok(SSEEvent::MessageDelta { delta })
+            let delta_val = &data_val["delta"];
+            let stop_reason = delta_val["stop_reason"].as_str().map(|s| s.to_string());
+            let output_tokens = data_val["usage"]["output_tokens"].as_u64().unwrap_or(0) as u32;
+            
+            Ok(SSEEvent::MessageDelta {
+                delta: MessageDeltaPayload {
+                    stop_reason,
+                    token_usage: Some(TokenUsage {
+                        input_tokens: 0,
+                        output_tokens,
+                        cache_creation_tokens: 0,
+                        cache_read_tokens: 0,
+                    }),
+                },
+            })
         }
-        "session_end" => Ok(SSEEvent::SessionEnd),
-        _ => {
-            // Unrecognized event type, deserialize as SessionEnd or return error,
-            // but the spec says to skip unknown events gracefully.
-            // We can return a specific error that the caller ignores.
-            Err(serde::de::Error::custom(format!("Unknown event type: {}", event_name)))
-        }
+        "message_stop" => Ok(SSEEvent::SessionEnd),
+        _ => Err(serde::de::Error::custom("Unknown event type")),
     }
 }

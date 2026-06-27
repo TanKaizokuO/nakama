@@ -1,108 +1,22 @@
-pub const DEFAULT_MAX_TOKENS: u32 = 4096;
+import sys
 
-use crate::session::Session;
-use crate::worker_state::WorkerStateManager;
-use crate::data_contracts::WorkerState;
-use crate::compaction::{CompactionEngine, CompactionConfig};
-use crate::data_contracts::{MessageRole, SessionMessageRecord, ContentBlock, StagePermissionMode};
-use crate::nim_accumulator::NimAccumulator;
-use std::io::Write;
-use std::path::PathBuf;
+with open("src/runtime.rs", "r") as f:
+    content = f.read()
 
-pub struct RuntimeConfig {
-    pub base_dir: PathBuf,
-    pub provider_config: crate::data_contracts::ProviderConfig,
-    pub permission_mode: String,
-    pub workspace_root: PathBuf,
-    pub stage_permission_mode: StagePermissionMode,
-    pub compaction_threshold: usize,
-    pub app_config: crate::config::AppConfig,
-}
+prefix_str = "        self.persist_session();\n\n        loop {"
+if prefix_str not in content:
+    print("Cannot find anchor")
+    sys.exit(1)
 
-pub struct ConversationRuntime {
-    pub session: Session,
-    pub worker_state_manager: WorkerStateManager,
-    pub compaction_engine: CompactionEngine,
-    pub turn_count: usize,
-    pub workspace_root: PathBuf,
-    pub stage_permission_mode: StagePermissionMode,
-    pub provider_config: crate::data_contracts::ProviderConfig,
-    pub app_config: crate::config::AppConfig,
-}
+prefix_idx = content.find(prefix_str)
+suffix_str = "    pub fn persist_session(&mut self) {"
+suffix_idx = content.find(suffix_str)
 
-impl ConversationRuntime {
-    pub fn new(config: RuntimeConfig, session_id: Option<&str>) -> Self {
-        let base_dir = config.base_dir.clone();
-        let model = config.provider_config.model.clone();
-        
-        let session = if let Some(sid) = session_id {
-            Session::resume(base_dir.clone(), sid).unwrap_or_else(|_| Session::new(base_dir.clone(), model.clone(), config.permission_mode.clone()))
-        } else {
-            Session::new(base_dir.clone(), model, config.permission_mode.clone())
-        };
+if suffix_idx == -1:
+    print("Cannot find suffix")
+    sys.exit(1)
 
-        Self {
-            session,
-            worker_state_manager: WorkerStateManager::new(base_dir),
-            compaction_engine: CompactionEngine::new(CompactionConfig { max_budget: config.compaction_threshold, ..Default::default() }),
-            turn_count: 0,
-            workspace_root: config.workspace_root,
-            stage_permission_mode: config.stage_permission_mode,
-            provider_config: config.provider_config,
-            app_config: config.app_config,
-        }
-    }
-
-    pub fn estimate_tokens(&self) -> usize {
-        self.session.messages.iter()
-            .filter(|m| m.role == MessageRole::Assistant)
-            .filter_map(|m| m.usage)
-            .map(|u| (u.input_tokens + u.output_tokens) as usize)
-            .sum()
-    }
-
-    /// Real streaming provider call to NVIDIA NIM (OpenAI-compatible).
-    ///
-    /// Sends user input to the NIM endpoint, streams the response to stdout
-    /// chunk by chunk, then persists both the user and assistant turns to JSONL.
-    pub async fn execute_turn_async(
-        &mut self,
-        user_input: &str,
-    ) {
-        // Step 1: Skip empty input
-        if user_input.trim().is_empty() {
-            return;
-        }
-
-        // Compaction check before adding new message
-        let token_estimate = self.estimate_tokens();
-        if token_estimate > self.compaction_engine.threshold() {
-            if let Ok(Some(_record)) = self.compaction_engine.compact(&mut self.session.messages, false) {
-                let system_msg = SessionMessageRecord {
-                    role: MessageRole::User,
-                    content: vec![ContentBlock::Text {
-                        text: "[Context compacted. Prior conversation summarised above.]".to_string(),
-                    }],
-                    usage: None,
-                    timestamp: chrono::Utc::now().to_rfc3339(),
-                    tool_call_id: None,
-                };
-                self.session.messages.push(system_msg);
-            }
-        }
-
-        // Persist User Turn initially
-        let user_record = SessionMessageRecord {
-            role: MessageRole::User,
-            content: vec![ContentBlock::Text { text: user_input.to_string() }],
-            usage: None,
-            timestamp: chrono::Utc::now().to_rfc3339(),
-            tool_call_id: None,
-        };
-        self.session.messages.push(user_record);
-        self.persist_session();
-
-        loop {
+new_loop = """        loop {
             let is_anthropic = matches!(self.provider_config.auth_header, crate::data_contracts::AuthHeader::XApiKey);
             
             let mut request_body = serde_json::Map::new();
@@ -116,7 +30,7 @@ impl ConversationRuntime {
 
             if let Some(ref instructions) = self.app_config.instruction_content {
                 if std::env::var("TEST_CONFIG").is_ok() {
-                    println!("INSTRUCTIONS_LOADED:\n{}", instructions);
+                    println!("INSTRUCTIONS_LOADED:\\n{}", instructions);
                     std::process::exit(0);
                 }
                 if is_anthropic {
@@ -346,7 +260,7 @@ impl ConversationRuntime {
                 let chunk_str = String::from_utf8_lossy(&chunk_bytes);
                 line_buffer.push_str(&chunk_str);
 
-                while let Some(newline_pos) = line_buffer.find('\n') {
+                while let Some(newline_pos) = line_buffer.find('\\n') {
                     let line = line_buffer[..newline_pos].trim().to_string();
                     line_buffer = line_buffer[newline_pos + 1..].to_string();
 
@@ -371,7 +285,7 @@ impl ConversationRuntime {
                                     }
                                     anthropic_accumulator.transition(event);
                                 }
-                                Err(_) => {
+                                Err(e) => {
                                     // Silently ignore unrecognized events
                                 }
                             }
@@ -396,10 +310,7 @@ impl ConversationRuntime {
             }
 
             let provider_result = if is_anthropic {
-                {
-                println!("DEBUG anthropic_accumulator: {:#?}", &anthropic_accumulator);
                 anthropic_accumulator.into_provider_turn_result()
-            }
             } else {
                 nim_accumulator.into_provider_turn_result()
             };
@@ -409,7 +320,7 @@ impl ConversationRuntime {
             if is_tool_call {
                 if let Some(tc) = provider_result.tool_calls.first() {
                     let args_str = serde_json::to_string(&tc.input).unwrap_or_default();
-                    println!("\n[tool: {}({})]", tc.name, args_str);
+                    println!("\\n[tool: {}({})]", tc.name, args_str);
                     
                     let mut is_denied = false;
                     
@@ -485,23 +396,10 @@ impl ConversationRuntime {
             }
         }
     }
+"""
 
-    pub fn persist_session(&mut self) {
-        if let Err(e) = self.session.save() {
-            eprintln!("Failed to save session: {}", e);
-        }
+new_content = content[:prefix_idx + len("        self.persist_session();\n\n")] + new_loop + "\n" + content[suffix_idx:]
+new_content = "pub const DEFAULT_MAX_TOKENS: u32 = 4096;\n\n" + new_content
 
-        self.turn_count += 1;
-        if self.turn_count == 1 {
-            let state = WorkerState {
-                worker_id: uuid::Uuid::new_v4().to_string(),
-                session_id: self.session.metadata.session_id.clone(),
-                model: self.session.metadata.model.clone(),
-                permission_mode: self.session.metadata.permission_mode.clone(),
-            };
-            if let Err(e) = self.worker_state_manager.write_state(&state) {
-                eprintln!("Failed to write worker state: {}", e);
-            }
-        }
-    }
-}
+with open("src/runtime.rs", "w") as f:
+    f.write(new_content)

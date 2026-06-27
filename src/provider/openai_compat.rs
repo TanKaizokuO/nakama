@@ -408,7 +408,7 @@ fn map_openai_event(data: &str) -> Result<SSEEvent, ProviderError> {
             // Delta JSON string argument segment
             return Ok(SSEEvent::ContentBlockDelta {
                 index: 0,
-                delta: DeltaPayload::Json { json: arguments },
+                delta: DeltaPayload::Json { partial_json: arguments },
             });
         }
     }

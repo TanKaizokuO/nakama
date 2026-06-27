@@ -389,7 +389,7 @@ fn map_anthropic_event(event_name: &str, data: &str) -> Result<SSEEvent, Provide
                 }
                 "input_json_delta" => {
                     let json = delta_val["partial_json"].as_str().unwrap_or_default().to_string();
-                    DeltaPayload::Json { json }
+                    DeltaPayload::Json { partial_json: json }
                 }
                 "thinking_delta" => {
                     let thinking = delta_val["thinking"].as_str().unwrap_or_default().to_string();

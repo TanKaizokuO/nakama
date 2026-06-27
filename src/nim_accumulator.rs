@@ -10,7 +10,6 @@
 // If the provider does not honour this flag, token counts will be zero and a
 // warning is logged (see G1 in the implementation plan).
 
-use crate::data_contracts::UsageRecord;
 
 #[derive(Debug, Clone, Default)]
 pub struct ToolCallAccumulation {
@@ -146,7 +145,7 @@ impl NimAccumulator {
     /// Returns (tool_call_opt, full_text, usage_record, stop_reason).
     /// If usage tokens are both zero after a completed stream, logs a warning
     /// per G1 — the provider may not have honoured stream_options.include_usage.
-    pub fn into_tool_call(self) -> (Option<ToolCallAccumulation>, String, UsageRecord, Option<String>) {
+    pub fn into_provider_turn_result(self) -> crate::data_contracts::ProviderTurnResult {
         if self.done && self.input_tokens == 0 && self.output_tokens == 0 {
             eprintln!(
                 "Warning: stream completed but no token usage was reported. \
@@ -154,13 +153,28 @@ impl NimAccumulator {
             );
         }
 
-        let usage = UsageRecord {
+        let usage = crate::data_contracts::UsageRecord {
             input_tokens: self.input_tokens,
             output_tokens: self.output_tokens,
             cache_creation_tokens: 0, // NIM does not return cache metrics
             cache_read_tokens: 0,
         };
 
-        (self.tool_call, self.text_buffer, usage, self.stop_reason)
+        let mut tool_calls = Vec::new();
+        if let Some(tc) = self.tool_call {
+            let parsed_input = serde_json::from_str(&tc.arguments).unwrap_or(serde_json::json!(tc.arguments));
+            tool_calls.push(crate::data_contracts::AccumulatedToolCall {
+                id: tc.id,
+                name: tc.name,
+                input: parsed_input,
+            });
+        }
+
+        crate::data_contracts::ProviderTurnResult {
+            text: self.text_buffer,
+            tool_calls,
+            stop_reason: self.stop_reason,
+            usage: Some(usage),
+        }
     }
 }

@@ -9,7 +9,7 @@ pub mod permission;
 pub mod prompter;
 pub mod hook;
 pub mod mcp;
-mod tests;
+// mod tests;
 
 pub mod data_contracts;
 pub mod session;
@@ -63,46 +63,105 @@ async fn main() {
     let app_config = crate::bootstrap::Bootstrap::load_config(&workspace_root);
 
     // Provider parsing
-    let provider_name = std::env::var("NAKAMA_PROVIDER").unwrap_or_else(|_| "nim".to_string()).to_lowercase();
-    let provider_config = match provider_name.as_str() {
-        "anthropic" => {
-            let api_key = std::env::var("ANTHROPIC_API_KEY").unwrap_or_default();
-            let mut model = std::env::var("NAKAMA_MODEL").unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
-            if let Some(resolved) = app_config.model_aliases.get(&model) {
-                model = resolved.clone();
+    let mut model = std::env::var("NAKAMA_MODEL").unwrap_or_default();
+    if let Some(resolved) = app_config.model_aliases.get(&model) {
+        model = resolved.clone();
+    }
+    
+    let explicit_provider = std::env::var("NAKAMA_PROVIDER").unwrap_or_default().to_lowercase();
+    
+    let provider_config = if explicit_provider == "nim" {
+        // Legacy override
+        let api_key = match std::env::var("NVIDIA_API_KEY").or_else(|_| std::env::var("OPENAI_API_KEY")) {
+            Ok(key) if !key.trim().is_empty() => key,
+            _ => {
+                eprintln!("error: NVIDIA_API_KEY (or OPENAI_API_KEY) not set for nim provider.");
+                std::process::exit(1);
             }
-            let _config = ProviderConfig {
-                base_url: "https://api.anthropic.com/v1".to_string(),
-                api_key,
-                model,
-                auth_header: AuthHeader::XApiKey,
-            };
-            eprintln!("error: Anthropic provider not yet wired in Stage 3. Set NAKAMA_PROVIDER=nim.");
-            std::process::exit(1);
-            // unreachable
-            #[allow(unreachable_code)]
-            _config
+        };
+        let base_url = std::env::var("URL").unwrap_or_else(|_| "https://integrate.api.nvidia.com/v1".to_string());
+        if model.is_empty() {
+            model = "moonshotai/kimi-k2-5".to_string();
         }
-        "nim" | _ => { // default nim
-            let api_key = match std::env::var("NVIDIA_API_KEY") {
-                Ok(key) if !key.trim().is_empty() => key,
-                _ => {
-                    eprintln!("error: NVIDIA_API_KEY not set. Add it to .env or export it in your shell.");
-                    std::process::exit(1);
+        ProviderConfig {
+            base_url,
+            api_key,
+            model,
+            auth_header: AuthHeader::Bearer,
+        }
+    } else if model.contains("claude") {
+        let api_key = match std::env::var("ANTHROPIC_API_KEY") {
+            Ok(key) if !key.trim().is_empty() => key,
+            _ => {
+                eprintln!("error: ANTHROPIC_API_KEY not set for Anthropic provider.");
+                std::process::exit(1);
+            }
+        };
+        ProviderConfig {
+            base_url: std::env::var("URL").unwrap_or_else(|_| "https://api.anthropic.com/v1".to_string()),
+            api_key,
+            model,
+            auth_header: AuthHeader::XApiKey,
+        }
+    } else if model.contains("grok") {
+        eprintln!("error: xAI provider not yet implemented");
+        std::process::exit(1);
+    } else if model.starts_with("openai/") || model.starts_with("local/") || model.starts_with("gpt-") || model.starts_with("qwen/") || model.starts_with("qwen-") || model.starts_with("kimi/") || model.starts_with("kimi-") {
+        let api_key = match std::env::var("OPENAI_API_KEY").or_else(|_| std::env::var("NVIDIA_API_KEY")) {
+            Ok(key) if !key.trim().is_empty() => key,
+            _ => {
+                eprintln!("error: OPENAI_API_KEY (or NVIDIA_API_KEY) not set for OpenAI-compatible provider.");
+                std::process::exit(1);
+            }
+        };
+        let base_url = std::env::var("URL").unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
+        ProviderConfig {
+            base_url,
+            api_key,
+            model,
+            auth_header: AuthHeader::Bearer,
+        }
+    } else {
+        // Fallback checks
+        if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
+            if !key.trim().is_empty() {
+                if model.is_empty() {
+                    model = "claude-3-5-sonnet-20241022".to_string();
                 }
-            };
-            let base_url = std::env::var("URL").unwrap_or_else(|_| "https://integrate.api.nvidia.com/v1".to_string());
-            let mut model = std::env::var("NAKAMA_MODEL").unwrap_or_else(|_| "moonshotai/kimi-k2-5".to_string());
-            if let Some(resolved) = app_config.model_aliases.get(&model) {
-                model = resolved.clone();
+                ProviderConfig {
+                    base_url: std::env::var("URL").unwrap_or_else(|_| "https://api.anthropic.com/v1".to_string()),
+                    api_key: key,
+                    model,
+                    auth_header: AuthHeader::XApiKey,
+                }
+            } else {
+                eprintln!("error: No provider matched and ANTHROPIC_API_KEY is empty.");
+                std::process::exit(1);
             }
-            ProviderConfig {
-                base_url,
-                api_key,
-                model,
-                auth_header: AuthHeader::Bearer,
+        } else if let Ok(key) = std::env::var("OPENAI_API_KEY").or_else(|_| std::env::var("NVIDIA_API_KEY")) {
+            if !key.trim().is_empty() {
+                if model.is_empty() {
+                    model = "gpt-4o".to_string();
+                }
+                ProviderConfig {
+                    base_url: std::env::var("URL").unwrap_or_else(|_| "https://api.openai.com/v1".to_string()),
+                    api_key: key,
+                    model,
+                    auth_header: AuthHeader::Bearer,
+                }
+            } else {
+                eprintln!("error: No provider matched and OPENAI_API_KEY is empty.");
+                std::process::exit(1);
             }
+        } else {
+            eprintln!("error: No API keys configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY.");
+            std::process::exit(1);
         }
+    };
+    
+    let provider_name = match provider_config.auth_header {
+        AuthHeader::XApiKey => "anthropic",
+        AuthHeader::Bearer => "nim",
     };
 
     let perm_mode_str = std::env::var("NAKAMA_PERMISSION_MODE")

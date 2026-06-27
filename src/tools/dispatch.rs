@@ -106,7 +106,7 @@ async fn tool_shell(args: &Value) -> Result<String, String> {
     let command = args.get("command").and_then(|v| v.as_str()).ok_or("error: missing 'command' parameter")?;
     let timeout_ms = args.get("timeout_ms").and_then(|v| v.as_u64()).unwrap_or(10000);
 
-    let mut child = tokio::process::Command::new("sh")
+    let child = tokio::process::Command::new("sh")
         .arg("-c")
         .arg(command)
         .stdout(std::process::Stdio::piped())

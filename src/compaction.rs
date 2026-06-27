@@ -24,6 +24,16 @@ impl CompactionEngine {
         Self { config }
     }
 
+    pub fn threshold(&self) -> usize {
+        self.config.max_budget
+    }
+
+    pub fn compact(&self, messages: &mut Vec<SessionMessageRecord>, force: bool) -> Result<Option<crate::data_contracts::CompactionRecord>, String> {
+        let (new_messages, record) = self.maybe_compact(std::mem::take(messages), force);
+        *messages = new_messages;
+        Ok(record)
+    }
+
     pub fn estimate_tokens(msg: &SessionMessageRecord) -> usize {
         let mut total = 0;
         for block in &msg.content {
@@ -55,7 +65,7 @@ impl CompactionEngine {
         total
     }
 
-    pub fn maybe_compact(&self, messages: Vec<SessionMessageRecord>) -> (Vec<SessionMessageRecord>, Option<crate::data_contracts::CompactionRecord>) {
+    pub fn maybe_compact(&self, messages: Vec<SessionMessageRecord>, force: bool) -> (Vec<SessionMessageRecord>, Option<crate::data_contracts::CompactionRecord>) {
         if messages.is_empty() {
             return (messages, None);
         }
@@ -77,9 +87,11 @@ impl CompactionEngine {
             return (messages, None);
         }
 
-        let estimated_total: usize = messages[start_idx..].iter().map(Self::estimate_tokens).sum();
-        if estimated_total <= self.config.max_budget {
-            return (messages, None);
+        if !force {
+            let estimated_total: usize = messages[start_idx..].iter().map(Self::estimate_tokens).sum();
+            if estimated_total <= self.config.max_budget {
+                return (messages, None);
+            }
         }
 
         let mut preserve_start = messages.len().saturating_sub(self.config.preservation_count);

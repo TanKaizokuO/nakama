@@ -112,17 +112,16 @@ impl Session {
                     source: e,
                 })?;
                 
-                if let SessionMetadataRecord::SessionMeta { session_id, created_at, model, permission_mode, heartbeat, liveness, compaction_history } = meta_record {
-                    metadata = Some(SessionMetadata {
-                        session_id,
-                        created_at,
-                        model,
-                        permission_mode,
-                        heartbeat,
-                        liveness,
-                        compaction_history,
-                    });
-                }
+                let SessionMetadataRecord::SessionMeta { session_id, created_at, model, permission_mode, heartbeat, liveness, compaction_history } = meta_record;
+                metadata = Some(SessionMetadata {
+                    session_id,
+                    created_at,
+                    model,
+                    permission_mode,
+                    heartbeat,
+                    liveness,
+                    compaction_history,
+                });
             } else {
                 let msg: SessionMessageRecord = serde_json::from_str(&line).map_err(|e| SessionError::Deserialization {
                     path: path.to_string_lossy().to_string(),

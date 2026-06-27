@@ -2,49 +2,58 @@ use crate::session::Session;
 use crate::worker_state::WorkerStateManager;
 use crate::data_contracts::WorkerState;
 use crate::compaction::{CompactionEngine, CompactionConfig};
-use crate::slash_commands::SlashCommandRegistry;
-use crate::data_contracts::{MessageRole, SessionMessageRecord, ContentBlock, UsageRecord, StagePermissionMode};
+use crate::data_contracts::{MessageRole, SessionMessageRecord, ContentBlock, StagePermissionMode};
 use crate::nim_accumulator::NimAccumulator;
 use std::io::Write;
 use std::path::PathBuf;
 
 pub struct RuntimeConfig {
     pub base_dir: PathBuf,
-    pub active_model: String,
+    pub provider_config: crate::data_contracts::ProviderConfig,
     pub permission_mode: String,
     pub workspace_root: PathBuf,
     pub stage_permission_mode: StagePermissionMode,
+    pub compaction_threshold: usize,
 }
 
 pub struct ConversationRuntime {
     pub session: Session,
     pub worker_state_manager: WorkerStateManager,
     pub compaction_engine: CompactionEngine,
-    pub slash_commands: SlashCommandRegistry,
     pub turn_count: usize,
     pub workspace_root: PathBuf,
     pub stage_permission_mode: StagePermissionMode,
+    pub provider_config: crate::data_contracts::ProviderConfig,
 }
 
 impl ConversationRuntime {
     pub fn new(config: RuntimeConfig, session_id: Option<&str>) -> Self {
         let base_dir = config.base_dir.clone();
+        let model = config.provider_config.model.clone();
         
         let session = if let Some(sid) = session_id {
-            Session::resume(base_dir.clone(), sid).unwrap_or_else(|_| Session::new(base_dir.clone(), config.active_model.clone(), config.permission_mode.clone()))
+            Session::resume(base_dir.clone(), sid).unwrap_or_else(|_| Session::new(base_dir.clone(), model.clone(), config.permission_mode.clone()))
         } else {
-            Session::new(base_dir.clone(), config.active_model.clone(), config.permission_mode.clone())
+            Session::new(base_dir.clone(), model, config.permission_mode.clone())
         };
 
         Self {
             session,
             worker_state_manager: WorkerStateManager::new(base_dir),
-            compaction_engine: CompactionEngine::new(CompactionConfig::default()),
-            slash_commands: SlashCommandRegistry::new(),
+            compaction_engine: CompactionEngine::new(CompactionConfig { max_budget: config.compaction_threshold, ..Default::default() }),
             turn_count: 0,
             workspace_root: config.workspace_root,
             stage_permission_mode: config.stage_permission_mode,
+            provider_config: config.provider_config,
         }
+    }
+
+    pub fn estimate_tokens(&self) -> usize {
+        self.session.messages.iter()
+            .filter(|m| m.role == MessageRole::Assistant)
+            .filter_map(|m| m.usage)
+            .map(|u| (u.input_tokens + u.output_tokens) as usize)
+            .sum()
     }
 
     /// Real streaming provider call to NVIDIA NIM (OpenAI-compatible).
@@ -54,19 +63,27 @@ impl ConversationRuntime {
     pub async fn execute_turn_async(
         &mut self,
         user_input: &str,
-        api_key: &str,
-        base_url: &str,
     ) {
         // Step 1: Skip empty input
         if user_input.trim().is_empty() {
             return;
         }
 
-        // Step 2: Route slash commands (existing logic)
-        if let Some(cmd_output) = self.slash_commands.dispatch(user_input) {
-            println!("{}", cmd_output);
-            self.persist_session();
-            return;
+        // Compaction check before adding new message
+        let token_estimate = self.estimate_tokens();
+        if token_estimate > self.compaction_engine.threshold() {
+            if let Ok(Some(_record)) = self.compaction_engine.compact(&mut self.session.messages, false) {
+                let system_msg = SessionMessageRecord {
+                    role: MessageRole::User,
+                    content: vec![ContentBlock::Text {
+                        text: "[Context compacted. Prior conversation summarised above.]".to_string(),
+                    }],
+                    usage: None,
+                    timestamp: chrono::Utc::now().to_rfc3339(),
+                    tool_call_id: None,
+                };
+                self.session.messages.push(system_msg);
+            }
         }
 
         // Persist User Turn initially
@@ -82,7 +99,7 @@ impl ConversationRuntime {
 
         loop {
             // Build the OpenAI-compatible messages array from session history.
-            let mut messages: Vec<serde_json::Value> = self
+            let messages: Vec<serde_json::Value> = self
                 .session
                 .messages
                 .iter()
@@ -127,7 +144,7 @@ impl ConversationRuntime {
                             }
                         }
                         
-                        let mut msg = serde_json::json!({
+                        let msg = serde_json::json!({
                             "role": role,
                             "content": if text.is_empty() { serde_json::Value::Null } else { serde_json::json!(text) },
                             "tool_calls": tool_calls
@@ -149,7 +166,7 @@ impl ConversationRuntime {
 
             // Build request body with tools
             let request_body = serde_json::json!({
-                "model": "moonshotai/kimi-k2.6",
+                "model": self.provider_config.model,
                 "max_tokens": 4096,
                 "stream": true,
                 "stream_options": { "include_usage": true },
@@ -158,12 +175,22 @@ impl ConversationRuntime {
             });
 
             // Send POST request
-            let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+            let url = format!("{}/chat/completions", self.provider_config.base_url.trim_end_matches('/'));
             let client = reqwest::Client::new();
+            
+            let auth_header_value = match self.provider_config.auth_header {
+                crate::data_contracts::AuthHeader::Bearer => format!("Bearer {}", self.provider_config.api_key),
+                crate::data_contracts::AuthHeader::XApiKey => self.provider_config.api_key.clone(),
+            };
+            
+            let auth_header_key = match self.provider_config.auth_header {
+                crate::data_contracts::AuthHeader::Bearer => "Authorization",
+                crate::data_contracts::AuthHeader::XApiKey => "x-api-key",
+            };
 
             let response = match client
                 .post(&url)
-                .header("Authorization", format!("Bearer {}", api_key))
+                .header(auth_header_key, auth_header_value)
                 .header("Content-Type", "application/json")
                 .header("Accept", "text/event-stream")
                 .json(&request_body)
@@ -316,7 +343,7 @@ impl ConversationRuntime {
     }
 
 
-    fn persist_session(&mut self) {
+    pub fn persist_session(&mut self) {
         if let Err(e) = self.session.save() {
             eprintln!("Failed to save session: {}", e);
         }

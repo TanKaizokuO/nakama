@@ -31,6 +31,7 @@ pub struct HookManager {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct HookOutputParse {
     override_val: Option<String>, // aliased to "override" in json
     reason: Option<String>,

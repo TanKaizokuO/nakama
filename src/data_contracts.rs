@@ -107,3 +107,17 @@ pub enum StagePermissionMode {
     Prompt,  // ask user before each tool call
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuthHeader {
+    Bearer,
+    XApiKey,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProviderConfig {
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
+    pub auth_header: AuthHeader,
+}
+

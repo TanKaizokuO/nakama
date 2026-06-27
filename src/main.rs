@@ -28,8 +28,9 @@ pub mod runtime;
 pub mod nim_accumulator;
 
 use runtime::{ConversationRuntime, RuntimeConfig};
-use crate::data_contracts::StagePermissionMode;
-use std::io::{self, BufRead, Write};
+use crate::data_contracts::{StagePermissionMode, ProviderConfig, AuthHeader};
+use crate::slash_commands::{SlashCommandRegistry, SlashCommandResult};
+use std::io::{self, Write};
 use std::path::PathBuf;
 
 #[tokio::main]
@@ -37,21 +38,61 @@ async fn main() {
     // Step 1: Load .env
     dotenvy::dotenv().ok();
 
-    // Step 2: Read NVIDIA_API_KEY — exit with error if missing
-    let api_key = match std::env::var("NVIDIA_API_KEY") {
-        Ok(key) if !key.trim().is_empty() => key,
-        _ => {
-            eprintln!("error: NVIDIA_API_KEY not set. Add it to .env or export it in your shell.");
+    // Parse --session <id>
+    let mut args = std::env::args().skip(1);
+    let mut session_id_arg = None;
+    while let Some(arg) = args.next() {
+        if arg == "--session" {
+            session_id_arg = args.next();
+        }
+    }
+
+    let session_dir = PathBuf::from(".claw/sessions");
+
+    if let Some(ref id) = session_id_arg {
+        let file_path = session_dir.join(format!("{}.jsonl", id));
+        if !file_path.exists() {
+            eprintln!("error: session {} not found at .claw/sessions/{}.jsonl", id, id);
             std::process::exit(1);
         }
+    }
+
+    // Provider parsing
+    let provider_name = std::env::var("NAKAMA_PROVIDER").unwrap_or_else(|_| "nim".to_string()).to_lowercase();
+    let provider_config = match provider_name.as_str() {
+        "anthropic" => {
+            let api_key = std::env::var("ANTHROPIC_API_KEY").unwrap_or_default();
+            let model = std::env::var("NAKAMA_MODEL").unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
+            let _config = ProviderConfig {
+                base_url: "https://api.anthropic.com/v1".to_string(),
+                api_key,
+                model,
+                auth_header: AuthHeader::XApiKey,
+            };
+            eprintln!("error: Anthropic provider not yet wired in Stage 3. Set NAKAMA_PROVIDER=nim.");
+            std::process::exit(1);
+            // unreachable
+            #[allow(unreachable_code)]
+            _config
+        }
+        "nim" | _ => { // default nim
+            let api_key = match std::env::var("NVIDIA_API_KEY") {
+                Ok(key) if !key.trim().is_empty() => key,
+                _ => {
+                    eprintln!("error: NVIDIA_API_KEY not set. Add it to .env or export it in your shell.");
+                    std::process::exit(1);
+                }
+            };
+            let base_url = std::env::var("URL").unwrap_or_else(|_| "https://integrate.api.nvidia.com/v1".to_string());
+            let model = std::env::var("NAKAMA_MODEL").unwrap_or_else(|_| "moonshotai/kimi-k2-5".to_string());
+            ProviderConfig {
+                base_url,
+                api_key,
+                model,
+                auth_header: AuthHeader::Bearer,
+            }
+        }
     };
-
-    // Step 3: Read URL — default to https://integrate.api.nvidia.com/v1 if not set
-    let base_url = std::env::var("URL")
-        .unwrap_or_else(|_| "https://integrate.api.nvidia.com/v1".to_string());
-
-    // Step 4: Print ready message
-    println!("Nakama ready. Model: moonshotai/kimi-k2.6");
 
     let perm_mode_str = std::env::var("NAKAMA_PERMISSION_MODE")
         .unwrap_or_else(|_| "prompt".to_string())
@@ -62,30 +103,50 @@ async fn main() {
         _ => StagePermissionMode::Prompt,
     };
 
+    let compaction_threshold = std::env::var("NAKAMA_COMPACTION_THRESHOLD")
+        .unwrap_or_else(|_| "32000".to_string())
+        .parse::<usize>()
+        .unwrap_or(32000);
+
     let workspace_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
     // Initialize the conversation runtime
-    let session_dir = PathBuf::from(".claw/sessions");
     let config = RuntimeConfig {
         base_dir: session_dir,
-        active_model: "moonshotai/kimi-k2.6".to_string(),
+        provider_config: provider_config.clone(),
         permission_mode: "default".to_string(),
         workspace_root,
         stage_permission_mode,
+        compaction_threshold,
     };
-    let mut runtime = ConversationRuntime::new(config, None);
+    
+    let mut runtime = ConversationRuntime::new(config, session_id_arg.as_deref());
+
+    if session_id_arg.is_some() {
+        println!("Resuming session: {}", runtime.session.metadata.session_id);
+    } else {
+        println!("New session: {}", runtime.session.metadata.session_id);
+    }
+
+    println!("╭─ Nakama ──────────────────────────────╮");
+    println!("│  Session   {:<26} │", runtime.session.metadata.session_id);
+    println!("│  Model     {:<26} │", provider_config.model);
+    println!("│  Provider  {:<26} │", provider_name);
+    println!("│  Mode      {:<26} │", perm_mode_str);
+    println!("│  Compaction threshold: {:<14} │", format!("{} tokens", compaction_threshold));
+    println!("╰───────────────────────────────────────╯");
+    println!("Type /help for commands.");
+
+    let slash_registry = SlashCommandRegistry::new();
 
     // Step 5: REPL loop
     loop {
-        // Print prompt
         print!("> ");
         io::stdout().flush().unwrap();
 
-        // Read a line (without holding a persistent lock, so tool prompts can read stdin too)
         let mut line = String::new();
         match io::stdin().read_line(&mut line) {
             Ok(0) => {
-                // EOF (Ctrl-D)
                 println!();
                 break;
             }
@@ -98,17 +159,21 @@ async fn main() {
 
         let input = line.trim();
 
-        // Handle /quit
-        if input == "/quit" {
-            break;
-        }
-
-        // Skip empty lines
         if input.is_empty() {
             continue;
         }
 
-        // Execute the turn with real streaming
-        runtime.execute_turn_async(input, &api_key, &base_url).await;
+        if input.starts_with('/') {
+            match slash_registry.dispatch(input, &mut runtime) {
+                SlashCommandResult::Exit => break,
+                SlashCommandResult::Handled => {
+                    runtime.persist_session();
+                    continue;
+                }
+                SlashCommandResult::NotACommand => {}
+            }
+        }
+
+        runtime.execute_turn_async(input).await;
     }
 }

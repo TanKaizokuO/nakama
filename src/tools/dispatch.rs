@@ -77,6 +77,60 @@ pub fn build_tool_definitions() -> Value {
                     "required": ["path"]
                 }
             }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "web_fetch",
+                "description": "Fetches a URL.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url": { "type": "string", "description": "The URL to fetch" }
+                    },
+                    "required": ["url"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "web_search",
+                "description": "Searches the web.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "The search query" }
+                    },
+                    "required": ["query"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "todo_write",
+                "description": "Writes a todo item.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "todos": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "id": { "type": "string" },
+                                    "content": { "type": "string" },
+                                    "status": { "type": "string", "enum": ["pending", "in_progress", "completed"] },
+                                    "priority": { "type": "string", "enum": ["high", "medium", "low"] }
+                                },
+                                "required": ["content"]
+                            }
+                        }
+                    },
+                    "required": ["todos"]
+                }
+            }
         }
     ])
 }
@@ -93,6 +147,42 @@ pub async fn dispatch_tool(name: &str, arguments_str: &str, workspace_root: &Pat
         "file_write" => tool_file_write(&args, workspace_root).await,
         "grep_search" => tool_grep_search(&args, workspace_root).await,
         "list_files" => tool_list_files(&args, workspace_root).await,
+        "web_fetch" => {
+            let tool = crate::tools::web_fetch::WebFetch;
+            let ctx = crate::tools::ToolContext {
+                workspace_roots: vec![workspace_root.to_path_buf()],
+                cwd: workspace_root.to_path_buf(),
+            };
+            use crate::tools::Tool;
+            match tool.execute(args.clone(), ctx).await {
+                Ok(res) => Ok(res.message),
+                Err(err) => Err(err.message),
+            }
+        },
+        "web_search" => {
+            let tool = crate::tools::web_search::WebSearch;
+            let ctx = crate::tools::ToolContext {
+                workspace_roots: vec![workspace_root.to_path_buf()],
+                cwd: workspace_root.to_path_buf(),
+            };
+            use crate::tools::Tool;
+            match tool.execute(args.clone(), ctx).await {
+                Ok(res) => Ok(res.message),
+                Err(err) => Err(err.message),
+            }
+        },
+        "todo_write" => {
+            let tool = crate::tools::todo_write::TodoWrite;
+            let ctx = crate::tools::ToolContext {
+                workspace_roots: vec![workspace_root.to_path_buf()],
+                cwd: workspace_root.to_path_buf(),
+            };
+            use crate::tools::Tool;
+            match tool.execute(args.clone(), ctx).await {
+                Ok(res) => Ok(res.message),
+                Err(err) => Err(err.message),
+            }
+        },
         _ => Err(format!("error: unknown tool '{}'", name)),
     };
 

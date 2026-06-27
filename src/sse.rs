@@ -191,7 +191,7 @@ impl AccumulatorState {
                     SSEEvent::MessageDelta { delta } => {
                         response.stop_reason = delta.stop_reason;
                         if let Some(usage) = delta.token_usage {
-                            response.token_usage = usage;
+                            response.token_usage.output_tokens = usage.output_tokens;
                         }
                         *self = AccumulatorState::Finalizing { response };
                     }
@@ -380,5 +380,54 @@ pub fn parse_sse_event(event_name: &str, data: &str) -> Result<SSEEvent, serde_j
         }
         "message_stop" => Ok(SSEEvent::SessionEnd),
         _ => Err(serde::de::Error::custom("Unknown event type")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sse_token_accounting() {
+        let mut state = AccumulatorState::new();
+
+        let start_event = parse_sse_event("message_start", r#"{
+            "type": "message_start",
+            "message": {
+                "id": "msg_1",
+                "role": "assistant",
+                "model": "claude-3-opus",
+                "usage": {
+                    "input_tokens": 123,
+                    "cache_creation_input_tokens": 45,
+                    "cache_read_input_tokens": 67
+                }
+            }
+        }"#).unwrap();
+        
+        state.transition(start_event);
+
+        let delta_event = parse_sse_event("message_delta", r#"{
+            "type": "message_delta",
+            "delta": {
+                "stop_reason": "end_turn"
+            },
+            "usage": {
+                "output_tokens": 89
+            }
+        }"#).unwrap();
+
+        state.transition(delta_event);
+
+        let end_event = parse_sse_event("message_stop", r#"{"type": "message_stop"}"#).unwrap();
+        state.transition(end_event);
+
+        let provider_res = state.into_provider_turn_result();
+        let usage = provider_res.usage.unwrap();
+        
+        assert_eq!(usage.input_tokens, 123);
+        assert_eq!(usage.output_tokens, 89);
+        assert_eq!(usage.cache_creation_tokens, 45);
+        assert_eq!(usage.cache_read_tokens, 67);
     }
 }

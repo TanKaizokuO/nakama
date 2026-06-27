@@ -312,3 +312,84 @@ fn validate_single_path(path: &Path, workspace_roots: &[PathBuf]) -> ValidationR
     }
 }
 
+
+#[cfg(test)]
+mod hardening_tests {
+    use super::*;
+    use std::fs;
+    
+    #[test]
+    fn test_symlink_escape() {
+        let out_dir = PathBuf::from("/tmp/nakama_test_out");
+        let _ = fs::create_dir_all(&out_dir);
+        let file_out = out_dir.join("secret.txt");
+        let _ = fs::write(&file_out, "secret");
+
+        let workspace_root = std::env::current_dir().unwrap();
+        let symlink_path = workspace_root.join("symlink_to_secret");
+        let _ = std::os::unix::fs::symlink(&file_out, &symlink_path);
+
+        let res = validate_path(&symlink_path.to_string_lossy(), &[workspace_root.clone()], &workspace_root);
+        let _ = fs::remove_file(&symlink_path);
+        
+        match res {
+            ValidationResult::Denied { reason, .. } => {
+                assert!(reason.contains("resolves outside workspace scope"));
+            }
+            _ => panic!("Symlink escape should be denied"),
+        }
+    }
+    
+    #[test]
+    fn test_windows_unc_path() {
+        let workspace_root = std::env::current_dir().unwrap();
+        
+        let path = "\\\\server\\share\\file.txt";
+        let res = validate_path(path, &[workspace_root.clone()], &workspace_root);
+        if cfg!(unix) {
+            match res {
+                ValidationResult::Denied { reason, .. } => {
+                    assert!(reason.contains("Windows or UNC paths"));
+                }
+                _ => panic!("UNC path should be denied on POSIX"),
+            }
+        }
+        
+        let path = "C:\\Windows\\System32";
+        let res = validate_path(path, &[workspace_root.clone()], &workspace_root);
+        if cfg!(unix) {
+            match res {
+                ValidationResult::Denied { reason, .. } => {
+                    assert!(reason.contains("Windows or UNC paths"));
+                }
+                _ => panic!("Windows path should be denied on POSIX"),
+            }
+        }
+    }
+    
+    #[test]
+    fn test_traversal_escape() {
+        let workspace_root = std::env::current_dir().unwrap();
+        let path = "../../etc/passwd";
+        let res = validate_path(path, &[workspace_root.clone()], &workspace_root);
+        match res {
+            ValidationResult::Denied { reason, .. } => {
+                assert!(reason.contains("resolves outside workspace scope"));
+            }
+            _ => panic!("Traversal escape should be denied"),
+        }
+    }
+    
+    #[test]
+    fn test_glob_escape() {
+        let workspace_root = std::env::current_dir().unwrap();
+        let path = "/*";
+        let res = validate_path(path, &[workspace_root.clone()], &workspace_root);
+        match res {
+            ValidationResult::Denied { reason, .. } => {
+                assert!(reason.contains("resolves outside workspace scope"));
+            }
+            _ => panic!("Glob escape should be denied"),
+        }
+    }
+}

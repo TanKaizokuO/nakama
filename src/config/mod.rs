@@ -189,13 +189,3 @@ fn discover_instructions(workspace_root: &Path) -> Option<String> {
         Some(instructions.join("\n---\n"))
     }
 }
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::path::PathBuf;
-    #[test]
-    fn test_merge() {
-        let config = load_merged_config(&PathBuf::from("."));
-        println!("{:?}", config.permission_rules.unwrap().denied_tools);
-    }
-}

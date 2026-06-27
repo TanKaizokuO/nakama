@@ -11,10 +11,10 @@ mod tests {
         AccumulatorState, DeltaPayload, MessageDeltaPayload, SSEEvent, parse_sse_event,
     };
     use crate::config::{
-        load_merged_config, Config, PermissionRules, get_config_paths
+        // load_merged_config, Config, PermissionRules, get_config_paths
     };
-    use crate::config::precedence::resolve_model;
-    use crate::config::aliases::resolve_alias;
+    // use crate::config::precedence::resolve_model;
+    // use crate::config::aliases::resolve_alias;
     use crate::path_scope::{
         tokenize_payload, extract_paths, validate_path, ValidationResult, is_path_like, expand_env_vars
     };
